@@ -1,0 +1,16 @@
+node_modules
+dist
+*.local
+.env
+coverage
+tests/e2e-report
+playwright-report
+
+# OS
+.DS_Store
+
+# IDE
+.idea
+.vscode
+*.swp
+*.swo
