@@ -1,10 +1,8 @@
 import {
   ProjectSession,
   defaultSession,
-  createMaskBuffer,
   type PaintColor,
   type SimulationMode,
-  type BrushState,
 } from "../types/session";
 
 // Actions map to TDD state transitions
@@ -134,7 +132,8 @@ export const hasMaskPixels = (s: ProjectSession) => {
     ? s.maskImageData
     : s.maskImageData.data;
   for (let i = 0; i < buf.length; i++) {
-    if (buf[i] > 0) return true;
+    const val = buf[i];
+    if (val !== undefined && val > 0) return true;
   }
   return false;
 };
