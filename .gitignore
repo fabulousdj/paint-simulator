@@ -1,10 +1,20 @@
 node_modules
 dist
+*.tsbuildinfo
 *.local
 .env
 coverage
 tests/e2e-report
 playwright-report
+.planning/
+graphify-out/
+.sisyphus/
+
+# Local agent/tool caches
+.claude/
+.opencode/
+.serena/
+*.pyc
 
 # OS
 .DS_Store
