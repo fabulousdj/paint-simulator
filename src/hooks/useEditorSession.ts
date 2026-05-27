@@ -1,4 +1,4 @@
-import { useReducer, useCallback, useRef, useEffect, type RefObject } from "react";
+import { useReducer, useCallback, useEffect, type RefObject } from "react";
 import { sessionReducer, type SessionAction } from "../state/session";
 import { defaultSession, type ProjectSession } from "../types/session";
 import { containDimensions, workingDimensions } from "../utils/coords";
@@ -177,7 +177,6 @@ function reducer(state: SessionState, action: EditorSessionAction): SessionState
 
 export function useEditorSession(containerRef: RefObject<HTMLDivElement | null>) {
   const [state, dispatch] = useReducer(reducer, initialState);
-  const canvasRef = useRef<HTMLCanvasElement | null>(null);
 
   useEffect(() => {
     if (!containerRef?.current) return;
@@ -192,29 +191,6 @@ export function useEditorSession(containerRef: RefObject<HTMLDivElement | null>)
     observer.observe(containerRef.current);
     return () => observer.disconnect();
   }, [containerRef]);
-
-  useEffect(() => {
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-
-    const ctx = canvas.getContext("2d");
-    if (!ctx) return;
-
-    const { session } = state;
-    canvas.width = state.displayW || 1;
-    canvas.height = state.displayH || 1;
-
-    if (session.image.sourceImageData && state.displayW > 0) {
-      const tempCanvas = document.createElement("canvas");
-      tempCanvas.width = session.image.workingWidth || 1;
-      tempCanvas.height = session.image.workingHeight || 1;
-      const tempCtx = tempCanvas.getContext("2d");
-      if (tempCtx) {
-        tempCtx.putImageData(session.image.sourceImageData, 0, 0);
-        ctx.drawImage(tempCanvas, 0, 0, state.displayW, state.displayH);
-      }
-    }
-  }, [state.displayW, state.displayH, state.session.image.sourceImageData]);
 
   const loadImageFile = useCallback(async (file: File) => {
     if (!isAcceptedImageFile(file)) {
@@ -246,7 +222,6 @@ export function useEditorSession(containerRef: RefObject<HTMLDivElement | null>)
   return {
     state,
     dispatch,
-    canvasRef,
     loadImageFile,
     upload: {
       isLoading: state.isLoading,
