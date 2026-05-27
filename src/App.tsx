@@ -1,25 +1,18 @@
 import { PaintBucket } from "lucide-react";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useRef, useState } from "react";
 import { EditorCanvas } from "./components/EditorCanvas";
 import { FixturePanel } from "./components/FixturePanel";
 import { ImageUpload } from "./components/ImageUpload";
 import { PaintInput } from "./components/PaintInput";
 import { useEditorSession } from "./hooks/useEditorSession";
 import type { PaintColor } from "./types/session";
-import { applyMaskBrush, createMaskBuffer, resetMaskBuffer } from "./utils/mask";
+import { resetMaskBuffer } from "./utils/mask";
 
 function App() {
   const workspaceRef = useRef<HTMLDivElement | null>(null);
-  const maskRef = useRef<Uint8ClampedArray | null>(null);
   const [showMaskOverlay, setShowMaskOverlay] = useState(true);
   const { state, dispatch, loadImageFile, upload } = useEditorSession(workspaceRef);
   const hasImage = state.session.image.sourceImageData !== null;
-
-  useEffect(() => {
-    maskRef.current = state.session.maskImageData instanceof Uint8ClampedArray
-      ? state.session.maskImageData
-      : null;
-  }, [state.session.maskImageData]);
 
   const setPaintA = useCallback(
     (paint: PaintColor | null) => {
@@ -39,31 +32,16 @@ function App() {
     dispatch({ type: "CLEAR_IMAGE" });
   }, [dispatch]);
 
-  const applyBrushStroke = useCallback(
-    (point: { x: number; y: number }) => {
-      const { workingWidth, workingHeight } = state.session.image;
-      if (workingWidth <= 0 || workingHeight <= 0) return;
-
-      const currentMask = maskRef.current ?? createMaskBuffer(workingWidth, workingHeight);
-      const nextMask = applyMaskBrush(currentMask, workingWidth, workingHeight, {
-        x: point.x,
-        y: point.y,
-        ...state.session.brush,
-      });
-      maskRef.current = nextMask;
-
-      dispatch({
-        type: "SET_MASK_BUFFER",
-        buffer: nextMask,
-      });
+  const commitMask = useCallback(
+    (mask: Uint8ClampedArray) => {
+      dispatch({ type: "SET_MASK_BUFFER", buffer: mask });
     },
-    [dispatch, state.session.brush, state.session.image]
+    [dispatch]
   );
 
   const resetMask = useCallback(() => {
     const { workingWidth, workingHeight } = state.session.image;
     const nextMask = resetMaskBuffer(workingWidth, workingHeight);
-    maskRef.current = nextMask;
     dispatch({ type: "SET_MASK_BUFFER", buffer: nextMask });
   }, [dispatch, state.session.image]);
 
@@ -208,7 +186,7 @@ function App() {
               displayHeight={state.session.image.displayHeight}
               brush={state.session.brush}
               showMaskOverlay={showMaskOverlay}
-              onBrushStroke={applyBrushStroke}
+              onMaskCommit={commitMask}
             />
           ) : (
             <div className="max-w-sm rounded-lg border border-gray-200 bg-white px-8 py-10 text-center shadow-sm">
