@@ -11,6 +11,7 @@ export type SessionAction =
   | { type: "CLEAR_IMAGE" }
   | { type: "SET_MASK_BUFFER"; buffer: Uint8ClampedArray }
   | { type: "SET_RESULT_BUFFER"; buffer: Uint8ClampedArray }
+  | { type: "CLEAR_RESULT_BUFFER" }
   | { type: "SET_PAINT_A"; paint: PaintColor }
   | { type: "SET_PAINT_B"; paint: PaintColor }
   | { type: "CLEAR_PAINT_A" }
@@ -52,6 +53,9 @@ export function sessionReducer(
 
     case "SET_RESULT_BUFFER":
       return { ...state, resultImageData: action.buffer };
+
+    case "CLEAR_RESULT_BUFFER":
+      return { ...state, resultImageData: null };
 
     case "SET_PAINT_A":
       return { ...state, paintA: action.paint };

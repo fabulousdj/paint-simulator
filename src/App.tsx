@@ -5,6 +5,7 @@ import { FixturePanel } from "./components/FixturePanel";
 import { ImageUpload } from "./components/ImageUpload";
 import { PaintInput } from "./components/PaintInput";
 import { useEditorSession } from "./hooks/useEditorSession";
+import { useSimulationWorker } from "./hooks/useSimulationWorker";
 import type { PaintColor } from "./types/session";
 import { resetMaskBuffer } from "./utils/mask";
 
@@ -12,6 +13,7 @@ function App() {
   const workspaceRef = useRef<HTMLDivElement | null>(null);
   const [showMaskOverlay, setShowMaskOverlay] = useState(true);
   const { state, dispatch, loadImageFile, upload } = useEditorSession(workspaceRef);
+  const simulation = useSimulationWorker(state.session, dispatch);
   const hasImage = state.session.image.sourceImageData !== null;
 
   const setPaintA = useCallback(
@@ -88,7 +90,7 @@ function App() {
             <div>
               <h2 className="text-sm font-semibold text-gray-900">Mask tools</h2>
               <p className="mt-1 text-xs text-gray-500">
-                Paint the wall area to preview in the next phase slice.
+                Paint the wall area to preview simulation.
               </p>
             </div>
             <div className="grid grid-cols-2 gap-2">
@@ -163,8 +165,30 @@ function App() {
             <p className="rounded-md bg-blue-50 p-3 text-xs text-blue-700">
               Local browser processing: enabled. Photos are not uploaded.
             </p>
-            <p className="rounded-md bg-amber-50 p-3 text-xs text-amber-700">
-              Browser QA blocked until Node 20.x LTS or Node 18.19+ is active.
+            <div className="rounded-md bg-gray-50 p-3 text-xs text-gray-700">
+              <label className="block font-medium text-gray-900" htmlFor="simulation-mode">
+                Simulation mode
+              </label>
+              <select
+                id="simulation-mode"
+                className="mt-2 w-full rounded-md border border-gray-200 bg-white px-2 py-1 text-xs"
+                value={state.session.simulationMode}
+                onChange={(event) =>
+                  dispatch({
+                    type: "SET_SIMULATION_MODE",
+                    mode: event.target.value === "rgb-ratio-debug" ? "rgb-ratio-debug" : "lab-delta-d50",
+                  })
+                }
+              >
+                <option value="lab-delta-d50">LAB D50 delta (default)</option>
+                <option value="rgb-ratio-debug">RGB ratio debug</option>
+              </select>
+            </div>
+            <p className="rounded-md bg-blue-50 p-3 text-xs text-blue-700">
+              Simulation status: {simulation.status}.
+              {simulation.metadata
+                ? ` Affected ${simulation.metadata.affectedPixelCount} pixels; clipped ${simulation.metadata.clippedPixelCount}.`
+                : " Add an image, valid paints, and a mask to run preview."}
             </p>
           </section>
         </aside>
