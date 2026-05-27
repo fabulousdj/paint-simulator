@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
-import { defaultSession, createMaskBuffer } from "../types/session";
+import { defaultSession } from "../types/session";
 import { sessionReducer, hasImage, hasMask, hasMaskPixels, canSimulate } from "../state/session";
+import { createMaskBuffer } from "../utils/mask";
 
 describe("default session", () => {
   it("has null values and lab-delta-d50 mode", () => {

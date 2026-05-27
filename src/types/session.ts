@@ -74,7 +74,3 @@ export const defaultSession: ProjectSession = {
     mode: "paint",
   },
 };
-
-// Pre-computed mask helper
-export const createMaskBuffer = (width: number, height: number): Uint8ClampedArray =>
-  new Uint8ClampedArray(width * height);

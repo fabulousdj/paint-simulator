@@ -1,14 +1,17 @@
 import { PaintBucket } from "lucide-react";
-import { useCallback, useRef } from "react";
+import { useCallback, useRef, useState } from "react";
+import { EditorCanvas } from "./components/EditorCanvas";
 import { FixturePanel } from "./components/FixturePanel";
 import { ImageUpload } from "./components/ImageUpload";
 import { PaintInput } from "./components/PaintInput";
 import { useEditorSession } from "./hooks/useEditorSession";
 import type { PaintColor } from "./types/session";
+import { resetMaskBuffer } from "./utils/mask";
 
 function App() {
   const workspaceRef = useRef<HTMLDivElement | null>(null);
-  const { state, dispatch, canvasRef, loadImageFile, upload } = useEditorSession(workspaceRef);
+  const [showMaskOverlay, setShowMaskOverlay] = useState(true);
+  const { state, dispatch, loadImageFile, upload } = useEditorSession(workspaceRef);
   const hasImage = state.session.image.sourceImageData !== null;
 
   const setPaintA = useCallback(
@@ -28,6 +31,19 @@ function App() {
   const clearImage = useCallback(() => {
     dispatch({ type: "CLEAR_IMAGE" });
   }, [dispatch]);
+
+  const commitMask = useCallback(
+    (mask: Uint8ClampedArray) => {
+      dispatch({ type: "SET_MASK_BUFFER", buffer: mask });
+    },
+    [dispatch]
+  );
+
+  const resetMask = useCallback(() => {
+    const { workingWidth, workingHeight } = state.session.image;
+    const nextMask = resetMaskBuffer(workingWidth, workingHeight);
+    dispatch({ type: "SET_MASK_BUFFER", buffer: nextMask });
+  }, [dispatch, state.session.image]);
 
   return (
     <div className="flex h-screen flex-col">
@@ -68,6 +84,80 @@ function App() {
           />
           <FixturePanel />
 
+          <section className="space-y-3 rounded-lg border border-gray-200 bg-white p-4 shadow-sm">
+            <div>
+              <h2 className="text-sm font-semibold text-gray-900">Mask tools</h2>
+              <p className="mt-1 text-xs text-gray-500">
+                Paint the wall area to preview in the next phase slice.
+              </p>
+            </div>
+            <div className="grid grid-cols-2 gap-2">
+              <button
+                type="button"
+                className={`rounded-md border px-3 py-2 text-xs font-medium ${
+                  state.session.brush.mode === "paint"
+                    ? "border-blue-500 bg-blue-50 text-blue-700"
+                    : "border-gray-200 text-gray-700"
+                }`}
+                onClick={() => dispatch({ type: "SET_BRUSH_MODE", mode: "paint" })}
+              >
+                Brush
+              </button>
+              <button
+                type="button"
+                className={`rounded-md border px-3 py-2 text-xs font-medium ${
+                  state.session.brush.mode === "erase"
+                    ? "border-red-500 bg-red-50 text-red-700"
+                    : "border-gray-200 text-gray-700"
+                }`}
+                onClick={() => dispatch({ type: "SET_BRUSH_MODE", mode: "erase" })}
+              >
+                Eraser
+              </button>
+            </div>
+            <label className="block text-xs font-medium text-gray-700">
+              Size: {state.session.brush.sizePx}px
+              <input
+                className="mt-2 w-full"
+                type="range"
+                min="4"
+                max="128"
+                value={state.session.brush.sizePx}
+                onChange={(event) => dispatch({ type: "SET_BRUSH_SIZE", size: Number(event.target.value) })}
+              />
+            </label>
+            <label className="block text-xs font-medium text-gray-700">
+              Opacity: {Math.round(state.session.brush.opacity * 100)}%
+              <input
+                className="mt-2 w-full"
+                type="range"
+                min="0.1"
+                max="1"
+                step="0.1"
+                value={state.session.brush.opacity}
+                onChange={(event) => dispatch({ type: "SET_BRUSH_OPACITY", opacity: Number(event.target.value) })}
+              />
+            </label>
+            <div className="grid grid-cols-2 gap-2">
+              <button
+                type="button"
+                className="rounded-md border border-gray-200 px-3 py-2 text-xs font-medium text-gray-700 disabled:cursor-not-allowed disabled:opacity-50"
+                disabled={!hasImage}
+                onClick={() => setShowMaskOverlay((visible) => !visible)}
+              >
+                {showMaskOverlay ? "Hide overlay" : "Show overlay"}
+              </button>
+              <button
+                type="button"
+                className="rounded-md border border-gray-200 px-3 py-2 text-xs font-medium text-gray-700 disabled:cursor-not-allowed disabled:opacity-50"
+                disabled={!hasImage}
+                onClick={resetMask}
+              >
+                Reset mask
+              </button>
+            </div>
+          </section>
+
           <section className="space-y-2 rounded-lg border border-gray-200 bg-white p-4 shadow-sm">
             <h2 className="text-sm font-semibold text-gray-900">Quality status</h2>
             <p className="rounded-md bg-blue-50 p-3 text-xs text-blue-700">
@@ -86,14 +176,17 @@ function App() {
               <p className="mt-2 text-xs text-gray-500">Your photo stays in your browser.</p>
             </div>
           ) : hasImage ? (
-            <canvas
-              ref={canvasRef}
-              aria-label="Uploaded room photo canvas"
-              className="max-h-full max-w-full rounded-lg border border-gray-200 bg-white shadow-sm"
-              style={{
-                width: state.session.image.displayWidth || undefined,
-                height: state.session.image.displayHeight || undefined,
-              }}
+            <EditorCanvas
+              sourceImageData={state.session.image.sourceImageData!}
+              resultImageData={state.session.resultImageData}
+              mask={state.session.maskImageData}
+              workingWidth={state.session.image.workingWidth}
+              workingHeight={state.session.image.workingHeight}
+              displayWidth={state.session.image.displayWidth}
+              displayHeight={state.session.image.displayHeight}
+              brush={state.session.brush}
+              showMaskOverlay={showMaskOverlay}
+              onMaskCommit={commitMask}
             />
           ) : (
             <div className="max-w-sm rounded-lg border border-gray-200 bg-white px-8 py-10 text-center shadow-sm">
