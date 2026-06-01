@@ -14,6 +14,7 @@ type WorkingPoint = {
 };
 
 export type MaskTool = "brush" | "eraser" | "edge-add" | "edge-remove" | "polygon-add" | "polygon-remove";
+export type CanvasViewMode = "before" | "after";
 
 type EditorCanvasProps = {
   sourceImageData: ImageData;
@@ -25,6 +26,7 @@ type EditorCanvasProps = {
   displayHeight: number;
   brush: BrushState;
   activeTool: MaskTool;
+  viewMode: CanvasViewMode;
   showMaskOverlay: boolean;
   polygonPoints: WorkingPoint[];
   onMaskCommit: (mask: Uint8ClampedArray) => void;
@@ -71,6 +73,7 @@ export function EditorCanvas({
   displayHeight,
   brush,
   activeTool,
+  viewMode,
   showMaskOverlay,
   polygonPoints,
   onMaskCommit,
@@ -160,7 +163,7 @@ export function EditorCanvas({
     if (!bounds) {
       ctx.clearRect(0, 0, canvas.width, canvas.height);
       ctx.drawImage(sourceCanvas, 0, 0, displayWidth, displayHeight);
-      if (resultCanvasRef.current) ctx.drawImage(resultCanvasRef.current, 0, 0, displayWidth, displayHeight);
+      if (viewMode === "after" && resultCanvasRef.current) ctx.drawImage(resultCanvasRef.current, 0, 0, displayWidth, displayHeight);
       if (showMaskOverlay && overlayCanvasRef.current) {
         ctx.drawImage(overlayCanvasRef.current, 0, 0, displayWidth, displayHeight);
       }
@@ -170,7 +173,7 @@ export function EditorCanvas({
     const rect = displayBounds(bounds);
     ctx.clearRect(rect.dx, rect.dy, rect.dw, rect.dh);
     ctx.drawImage(sourceCanvas, rect.sx, rect.sy, rect.sw, rect.sh, rect.dx, rect.dy, rect.dw, rect.dh);
-    if (resultCanvasRef.current) {
+    if (viewMode === "after" && resultCanvasRef.current) {
       ctx.drawImage(resultCanvasRef.current, rect.sx, rect.sy, rect.sw, rect.sh, rect.dx, rect.dy, rect.dw, rect.dh);
     }
     if (showMaskOverlay && overlayCanvasRef.current) {
@@ -226,7 +229,7 @@ export function EditorCanvas({
     maskRef.current = alpha;
     updateOverlay(alpha, null);
     redraw();
-  }, [displayHeight, displayWidth, mask, resultImageData, showMaskOverlay, sourceImageData, workingHeight, workingWidth]);
+  }, [displayHeight, displayWidth, mask, resultImageData, showMaskOverlay, sourceImageData, viewMode, workingHeight, workingWidth]);
 
   const pointFromEvent = (event: PointerEvent<HTMLCanvasElement>) => {
     const rect = event.currentTarget.getBoundingClientRect();

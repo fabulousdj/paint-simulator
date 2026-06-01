@@ -1,15 +1,17 @@
 import { PaintBucket } from "lucide-react";
-import { useCallback, useRef, useState } from "react";
-import { EditorCanvas, type MaskTool } from "./components/EditorCanvas";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { EditorCanvas, type CanvasViewMode, type MaskTool } from "./components/EditorCanvas";
 import { FixturePanel } from "./components/FixturePanel";
 import { ImageUpload } from "./components/ImageUpload";
 import { PaintInput } from "./components/PaintInput";
 import { useEditorSession } from "./hooks/useEditorSession";
 import { useSimulationWorker } from "./hooks/useSimulationWorker";
 import type { PaintColor } from "./types/session";
+import { composeExportImage, createExportFilename } from "./utils/export";
 import { emptyMaskHistory, pushMaskHistory, redoMaskHistory, undoMaskHistory, type MaskHistory } from "./utils/maskHistory";
 import { resetMaskBuffer } from "./utils/mask";
 import { applyPolygonToMask, edgeAwareAreaFill, type MaskApplyMode, type SmartMaskPoint } from "./utils/smartMask";
+import { getWorkflowReadiness } from "./utils/workflow";
 
 function App() {
   const workspaceRef = useRef<HTMLDivElement | null>(null);
@@ -18,9 +20,17 @@ function App() {
   const [fillTolerance, setFillTolerance] = useState(34);
   const [polygonPoints, setPolygonPoints] = useState<SmartMaskPoint[]>([]);
   const [maskHistory, setMaskHistory] = useState<MaskHistory>(emptyMaskHistory);
+  const [viewMode, setViewMode] = useState<CanvasViewMode>("before");
+  const [exportError, setExportError] = useState<string | null>(null);
   const { state, dispatch, loadImageFile, upload } = useEditorSession(workspaceRef);
   const simulation = useSimulationWorker(state.session, dispatch);
   const hasImage = state.session.image.sourceImageData !== null;
+  const readiness = getWorkflowReadiness(state.session);
+  const canDownload = readiness.canExport && simulation.status === "complete";
+
+  useEffect(() => {
+    if (!state.session.resultImageData && viewMode === "after") setViewMode("before");
+  }, [state.session.resultImageData, viewMode]);
 
   const setPaintA = useCallback(
     (paint: PaintColor | null) => {
@@ -144,6 +154,43 @@ function App() {
     setPolygonPoints([]);
   }, [activeTool, commitMaskChange, currentMask, polygonPoints, state.session.brush.opacity, state.session.image]);
 
+  const downloadResult = useCallback(async () => {
+    setExportError(null);
+    const sourceImageData = state.session.image.sourceImageData;
+    if (!sourceImageData || !canDownload) return;
+
+    try {
+      const exportImage = composeExportImage({
+        sourceImageData,
+        resultImageData: state.session.resultImageData,
+        mask: state.session.maskImageData,
+      });
+      const canvas = document.createElement("canvas");
+      canvas.width = exportImage.width;
+      canvas.height = exportImage.height;
+      const context = canvas.getContext("2d");
+      if (!context) throw new Error("Could not create export canvas.");
+      context.putImageData(exportImage, 0, 0);
+
+      const blob = await new Promise<Blob>((resolve, reject) => {
+        canvas.toBlob((nextBlob) => {
+          if (nextBlob) resolve(nextBlob);
+          else reject(new Error("Could not encode export image."));
+        }, "image/png");
+      });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = createExportFilename();
+      document.body.append(link);
+      link.click();
+      link.remove();
+      window.setTimeout(() => URL.revokeObjectURL(url), 0);
+    } catch (error) {
+      setExportError(error instanceof Error ? error.message : "Could not export the simulated image.");
+    }
+  }, [canDownload, state.session.image.sourceImageData, state.session.maskImageData, state.session.resultImageData]);
+
   const toolButtonClass = (tool: MaskTool) =>
     `rounded-md border px-3 py-2 text-xs font-medium ${
       activeTool === tool ? "border-blue-500 bg-blue-50 text-blue-700" : "border-gray-200 text-gray-700"
@@ -220,6 +267,18 @@ function App() {
                 ? ` Affected ${simulation.metadata.affectedPixelCount} pixels; clipped ${simulation.metadata.clippedPixelCount}.`
                 : " Add an image, valid paints, and a mask to run preview."}
             </p>
+            <div className="rounded-md bg-gray-50 p-3 text-xs text-gray-700">
+              <h3 className="font-medium text-gray-900">Workflow readiness</h3>
+              {readiness.canSimulate ? (
+                <p className="mt-2 text-green-700">Ready to simulate with LAB D50 delta transfer.</p>
+              ) : (
+                <ul className="mt-2 space-y-1">
+                  {readiness.blockers.map((blocker) => (
+                    <li key={blocker.id}>{blocker.message}</li>
+                  ))}
+                </ul>
+              )}
+            </div>
           </section>
         </aside>
 
@@ -241,6 +300,7 @@ function App() {
               displayHeight={state.session.image.displayHeight}
               brush={state.session.brush}
               activeTool={activeTool}
+              viewMode={viewMode}
               showMaskOverlay={showMaskOverlay}
               polygonPoints={polygonPoints}
               onMaskCommit={commitMask}
@@ -257,7 +317,44 @@ function App() {
           )}
           </div>
           {hasImage ? (
-            <div className="mt-4 rounded-xl border border-gray-200 bg-white p-3 shadow-sm">
+            <div className="mt-4 space-y-3">
+            <div className="rounded-xl border border-gray-200 bg-white p-3 shadow-sm">
+              <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+                <div>
+                  <h2 className="text-xs font-semibold uppercase tracking-wide text-gray-500">Result controls</h2>
+                  <p className="mt-1 text-xs text-gray-500">
+                    Compare source and simulated pixels, then export the local working-size PNG without mask overlays.
+                  </p>
+                </div>
+                <div className="flex flex-wrap items-center gap-2">
+                  <button
+                    type="button"
+                    className={viewMode === "before" ? `${toolButtonClass("brush")} border-blue-500 bg-blue-50 text-blue-700` : actionButtonClass}
+                    onClick={() => setViewMode("before")}
+                  >
+                    Before
+                  </button>
+                  <button
+                    type="button"
+                    className={viewMode === "after" ? `${toolButtonClass("brush")} border-blue-500 bg-blue-50 text-blue-700` : actionButtonClass}
+                    disabled={!state.session.resultImageData}
+                    onClick={() => setViewMode("after")}
+                  >
+                    After
+                  </button>
+                  <button type="button" className={actionButtonClass} disabled={!canDownload} onClick={downloadResult}>
+                    Download PNG
+                  </button>
+                </div>
+              </div>
+              {!canDownload ? (
+                <p className="mt-3 text-xs text-gray-500">
+                  Export unlocks after the image, both paints, a non-empty mask, and a completed simulation are ready.
+                </p>
+              ) : null}
+              {exportError ? <p className="mt-3 text-xs text-red-600">{exportError}</p> : null}
+            </div>
+            <div className="rounded-xl border border-gray-200 bg-white p-3 shadow-sm">
               <div className="flex flex-wrap items-center gap-2 border-b border-gray-100 pb-3">
                 <span className="mr-1 text-xs font-semibold uppercase tracking-wide text-gray-500">Mask tools</span>
                 <button type="button" className={toolButtonClass("brush")} onClick={() => selectTool("brush")}>Brush</button>
@@ -322,6 +419,7 @@ function App() {
                     ? `Pinned vertices: ${polygonPoints.length}. Click the image to add points, then apply.`
                     : "Drag on the image to paint or erase the mask manually."}
               </p>
+            </div>
             </div>
           ) : null}
         </div>

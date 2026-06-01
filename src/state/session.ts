@@ -51,7 +51,7 @@ export function sessionReducer(
       };
 
     case "SET_MASK_BUFFER":
-      return { ...state, maskImageData: action.buffer };
+      return { ...state, maskImageData: action.buffer, resultImageData: null };
 
     case "SET_RESULT_BUFFER":
       return { ...state, resultImageData: action.buffer };
@@ -60,16 +60,16 @@ export function sessionReducer(
       return { ...state, resultImageData: null };
 
     case "SET_PAINT_A":
-      return { ...state, paintA: action.paint };
+      return { ...state, paintA: action.paint, resultImageData: null };
 
     case "SET_PAINT_B":
-      return { ...state, paintB: action.paint };
+      return { ...state, paintB: action.paint, resultImageData: null };
 
     case "CLEAR_PAINT_A":
-      return { ...state, paintA: null };
+      return { ...state, paintA: null, resultImageData: null };
 
     case "CLEAR_PAINT_B":
-      return { ...state, paintB: null };
+      return { ...state, paintB: null, resultImageData: null };
 
     case "SET_DISPLAY_SIZE":
       return {
@@ -82,7 +82,7 @@ export function sessionReducer(
       };
 
     case "SET_SIMULATION_MODE":
-      return { ...state, simulationMode: action.mode };
+      return { ...state, simulationMode: action.mode, resultImageData: null };
 
     case "SET_BRUSH_SIZE":
       return {
