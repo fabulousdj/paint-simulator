@@ -58,6 +58,15 @@ describe("session reducer", () => {
     expect(next.simulationMode).toBe("rgb-ratio-debug");
   });
 
+  it("CLEAR_RESULT_BUFFER clears result image data", () => {
+    const state = {
+      ...defaultSession,
+      resultImageData: new Uint8ClampedArray([1, 2, 3, 4]),
+    };
+    const next = sessionReducer(state, { type: "CLEAR_RESULT_BUFFER" });
+    expect(next.resultImageData).toBeNull();
+  });
+
   it("SET_BRUSH updates nested brush state", () => {
     let next = sessionReducer(defaultSession, { type: "SET_BRUSH_SIZE", size: 64 });
     expect(next.brush.sizePx).toBe(64);
