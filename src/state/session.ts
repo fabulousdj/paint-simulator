@@ -38,6 +38,8 @@ export function sessionReducer(
           workingWidth: action.workingW,
           workingHeight: action.workingH,
         },
+        maskImageData: null,
+        resultImageData: null,
       };
 
     case "CLEAR_IMAGE":
