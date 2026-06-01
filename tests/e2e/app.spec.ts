@@ -9,6 +9,8 @@ test("app loads and shows ChromaMatch title", async ({ page }) => {
   await expect(page.getByRole("heading", { name: "Current paint" })).toBeVisible();
   await expect(page.getByRole("heading", { name: "Target paint" })).toBeVisible();
   await expect(page.getByRole("heading", { name: "Dev samples" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Edge fill" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Poly add" })).toBeVisible();
   await expect(page.getByText("Local browser processing: enabled. Photos are not uploaded.")).toBeVisible();
   await expect(page.getByLabel("Simulation mode")).toHaveValue("lab-delta-d50");
   await expect(page.getByText(/Simulation status: idle/)).toBeVisible();

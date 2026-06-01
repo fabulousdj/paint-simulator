@@ -1,6 +1,6 @@
 import { PaintBucket } from "lucide-react";
 import { useCallback, useRef, useState } from "react";
-import { EditorCanvas } from "./components/EditorCanvas";
+import { EditorCanvas, type MaskTool } from "./components/EditorCanvas";
 import { FixturePanel } from "./components/FixturePanel";
 import { ImageUpload } from "./components/ImageUpload";
 import { PaintInput } from "./components/PaintInput";
@@ -8,10 +8,14 @@ import { useEditorSession } from "./hooks/useEditorSession";
 import { useSimulationWorker } from "./hooks/useSimulationWorker";
 import type { PaintColor } from "./types/session";
 import { resetMaskBuffer } from "./utils/mask";
+import { applyPolygonToMask, edgeAwareAreaFill, type MaskApplyMode, type SmartMaskPoint } from "./utils/smartMask";
 
 function App() {
   const workspaceRef = useRef<HTMLDivElement | null>(null);
   const [showMaskOverlay, setShowMaskOverlay] = useState(true);
+  const [activeTool, setActiveTool] = useState<MaskTool>("brush");
+  const [fillTolerance, setFillTolerance] = useState(34);
+  const [polygonPoints, setPolygonPoints] = useState<SmartMaskPoint[]>([]);
   const { state, dispatch, loadImageFile, upload } = useEditorSession(workspaceRef);
   const simulation = useSimulationWorker(state.session, dispatch);
   const hasImage = state.session.image.sourceImageData !== null;
@@ -31,6 +35,7 @@ function App() {
   );
 
   const clearImage = useCallback(() => {
+    setPolygonPoints([]);
     dispatch({ type: "CLEAR_IMAGE" });
   }, [dispatch]);
 
@@ -44,8 +49,74 @@ function App() {
   const resetMask = useCallback(() => {
     const { workingWidth, workingHeight } = state.session.image;
     const nextMask = resetMaskBuffer(workingWidth, workingHeight);
+    setPolygonPoints([]);
     dispatch({ type: "SET_MASK_BUFFER", buffer: nextMask });
   }, [dispatch, state.session.image]);
+
+  const currentMask = useCallback(() => {
+    const { workingWidth, workingHeight } = state.session.image;
+    return state.session.maskImageData instanceof Uint8ClampedArray
+      ? state.session.maskImageData
+      : resetMaskBuffer(workingWidth, workingHeight);
+  }, [state.session.image, state.session.maskImageData]);
+
+  const selectTool = useCallback(
+    (tool: MaskTool) => {
+      setActiveTool(tool);
+      if (tool === "brush") dispatch({ type: "SET_BRUSH_MODE", mode: "paint" });
+      if (tool === "eraser") dispatch({ type: "SET_BRUSH_MODE", mode: "erase" });
+      if (tool !== "polygon-add" && tool !== "polygon-remove") setPolygonPoints([]);
+    },
+    [dispatch]
+  );
+
+  const fillArea = useCallback(
+    (point: SmartMaskPoint, mode: MaskApplyMode) => {
+      const { sourceImageData, workingWidth, workingHeight } = state.session.image;
+      if (!sourceImageData || workingWidth <= 0 || workingHeight <= 0) return;
+
+      dispatch({
+        type: "SET_MASK_BUFFER",
+        buffer: edgeAwareAreaFill({
+          sourceImageData,
+          mask: currentMask(),
+          seed: point,
+          mode,
+          colorTolerance: fillTolerance,
+          edgeThreshold: 42,
+          opacity: state.session.brush.opacity,
+        }),
+      });
+    },
+    [currentMask, dispatch, fillTolerance, state.session.brush.opacity, state.session.image]
+  );
+
+  const addPolygonPoint = useCallback((point: SmartMaskPoint) => {
+    setPolygonPoints((points) => [...points, point]);
+  }, []);
+
+  const applyPolygon = useCallback(() => {
+    const { workingWidth, workingHeight } = state.session.image;
+    if (polygonPoints.length < 3 || workingWidth <= 0 || workingHeight <= 0) return;
+
+    dispatch({
+      type: "SET_MASK_BUFFER",
+      buffer: applyPolygonToMask({
+        mask: currentMask(),
+        width: workingWidth,
+        height: workingHeight,
+        points: polygonPoints,
+        mode: activeTool === "polygon-remove" ? "remove" : "add",
+        opacity: state.session.brush.opacity,
+      }),
+    });
+    setPolygonPoints([]);
+  }, [activeTool, currentMask, dispatch, polygonPoints, state.session.brush.opacity, state.session.image]);
+
+  const toolButtonClass = (tool: MaskTool) =>
+    `rounded-md border px-3 py-2 text-xs font-medium ${
+      activeTool === tool ? "border-blue-500 bg-blue-50 text-blue-700" : "border-gray-200 text-gray-700"
+    }`;
 
   return (
     <div className="flex h-screen flex-col">
@@ -96,25 +167,29 @@ function App() {
             <div className="grid grid-cols-2 gap-2">
               <button
                 type="button"
-                className={`rounded-md border px-3 py-2 text-xs font-medium ${
-                  state.session.brush.mode === "paint"
-                    ? "border-blue-500 bg-blue-50 text-blue-700"
-                    : "border-gray-200 text-gray-700"
-                }`}
-                onClick={() => dispatch({ type: "SET_BRUSH_MODE", mode: "paint" })}
+                className={toolButtonClass("brush")}
+                onClick={() => selectTool("brush")}
               >
                 Brush
               </button>
               <button
                 type="button"
-                className={`rounded-md border px-3 py-2 text-xs font-medium ${
-                  state.session.brush.mode === "erase"
-                    ? "border-red-500 bg-red-50 text-red-700"
-                    : "border-gray-200 text-gray-700"
-                }`}
-                onClick={() => dispatch({ type: "SET_BRUSH_MODE", mode: "erase" })}
+                className={toolButtonClass("eraser")}
+                onClick={() => selectTool("eraser")}
               >
                 Eraser
+              </button>
+              <button type="button" className={toolButtonClass("edge-add")} onClick={() => selectTool("edge-add")}>
+                Edge fill
+              </button>
+              <button type="button" className={toolButtonClass("edge-remove")} onClick={() => selectTool("edge-remove")}>
+                Edge remove
+              </button>
+              <button type="button" className={toolButtonClass("polygon-add")} onClick={() => selectTool("polygon-add")}>
+                Poly add
+              </button>
+              <button type="button" className={toolButtonClass("polygon-remove")} onClick={() => selectTool("polygon-remove")}>
+                Poly remove
               </button>
             </div>
             <label className="block text-xs font-medium text-gray-700">
@@ -126,6 +201,17 @@ function App() {
                 max="128"
                 value={state.session.brush.sizePx}
                 onChange={(event) => dispatch({ type: "SET_BRUSH_SIZE", size: Number(event.target.value) })}
+              />
+            </label>
+            <label className="block text-xs font-medium text-gray-700">
+              Edge tolerance: {fillTolerance}
+              <input
+                className="mt-2 w-full"
+                type="range"
+                min="8"
+                max="96"
+                value={fillTolerance}
+                onChange={(event) => setFillTolerance(Number(event.target.value))}
               />
             </label>
             <label className="block text-xs font-medium text-gray-700">
@@ -158,6 +244,31 @@ function App() {
                 Reset mask
               </button>
             </div>
+            <div className="grid grid-cols-2 gap-2">
+              <button
+                type="button"
+                className="rounded-md border border-gray-200 px-3 py-2 text-xs font-medium text-gray-700 disabled:cursor-not-allowed disabled:opacity-50"
+                disabled={polygonPoints.length < 3}
+                onClick={applyPolygon}
+              >
+                Apply polygon
+              </button>
+              <button
+                type="button"
+                className="rounded-md border border-gray-200 px-3 py-2 text-xs font-medium text-gray-700 disabled:cursor-not-allowed disabled:opacity-50"
+                disabled={polygonPoints.length === 0}
+                onClick={() => setPolygonPoints([])}
+              >
+                Reset polygon
+              </button>
+            </div>
+            <p className="text-xs text-gray-500">
+              {activeTool.startsWith("edge")
+                ? "Click once inside a wall-like area to fill or remove the detected region."
+                : activeTool.startsWith("polygon")
+                  ? `Pinned vertices: ${polygonPoints.length}. Click the image to add points, then apply.`
+                  : "Drag on the image to paint or erase the mask manually."}
+            </p>
           </section>
 
           <section className="space-y-2 rounded-lg border border-gray-200 bg-white p-4 shadow-sm">
@@ -209,8 +320,12 @@ function App() {
               displayWidth={state.session.image.displayWidth}
               displayHeight={state.session.image.displayHeight}
               brush={state.session.brush}
+              activeTool={activeTool}
               showMaskOverlay={showMaskOverlay}
+              polygonPoints={polygonPoints}
               onMaskCommit={commitMask}
+              onAreaFill={fillArea}
+              onPolygonPoint={addPolygonPoint}
             />
           ) : (
             <div className="max-w-sm rounded-lg border border-gray-200 bg-white px-8 py-10 text-center shadow-sm">

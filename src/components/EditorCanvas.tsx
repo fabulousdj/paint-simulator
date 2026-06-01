@@ -13,6 +13,8 @@ type WorkingPoint = {
   y: number;
 };
 
+export type MaskTool = "brush" | "eraser" | "edge-add" | "edge-remove" | "polygon-add" | "polygon-remove";
+
 type EditorCanvasProps = {
   sourceImageData: ImageData;
   resultImageData: ImageData | Uint8ClampedArray | null;
@@ -22,8 +24,12 @@ type EditorCanvasProps = {
   displayWidth: number;
   displayHeight: number;
   brush: BrushState;
+  activeTool: MaskTool;
   showMaskOverlay: boolean;
+  polygonPoints: WorkingPoint[];
   onMaskCommit: (mask: Uint8ClampedArray) => void;
+  onAreaFill: (point: WorkingPoint, mode: "add" | "remove") => void;
+  onPolygonPoint: (point: WorkingPoint) => void;
 };
 
 type DisplayCursor = WorkingPoint & {
@@ -64,8 +70,12 @@ export function EditorCanvas({
   displayWidth,
   displayHeight,
   brush,
+  activeTool,
   showMaskOverlay,
+  polygonPoints,
   onMaskCommit,
+  onAreaFill,
+  onPolygonPoint,
 }: EditorCanvasProps) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const sourceCanvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -232,8 +242,20 @@ export function EditorCanvas({
 
   const handlePointerDown = (event: PointerEvent<HTMLCanvasElement>) => {
     event.preventDefault();
-    event.currentTarget.setPointerCapture(event.pointerId);
     const point = pointFromEvent(event);
+    setCursorFromPoint(point);
+
+    if (activeTool === "edge-add" || activeTool === "edge-remove") {
+      onAreaFill(point, activeTool === "edge-add" ? "add" : "remove");
+      return;
+    }
+
+    if (activeTool === "polygon-add" || activeTool === "polygon-remove") {
+      onPolygonPoint(point);
+      return;
+    }
+
+    event.currentTarget.setPointerCapture(event.pointerId);
     const currentMask = maskRef.current && maskRef.current.length === workingWidth * workingHeight
       ? new Uint8ClampedArray(maskRef.current)
       : createMaskBuffer(workingWidth, workingHeight);
@@ -243,7 +265,11 @@ export function EditorCanvas({
     isDrawingRef.current = true;
     setCursorFromPoint(point);
 
-    const dirty = applyMaskBrushInPlace(currentMask, workingWidth, workingHeight, { ...brush, ...point });
+    const dirty = applyMaskBrushInPlace(currentMask, workingWidth, workingHeight, {
+      ...brush,
+      mode: activeTool === "eraser" ? "erase" : "paint",
+      ...point,
+    });
     if (dirty) {
       updateOverlay(currentMask, dirty);
       redraw(dirty);
@@ -261,7 +287,7 @@ export function EditorCanvas({
       workingHeight,
       lastPointRef.current,
       point,
-      brush
+      { ...brush, mode: activeTool === "eraser" ? "erase" : "paint" }
     );
     lastPointRef.current = point;
     if (dirty) {
@@ -307,6 +333,34 @@ export function EditorCanvas({
             height: cursor.radius * 2,
           }}
         />
+      ) : null}
+      {polygonPoints.length > 0 ? (
+        <svg
+          aria-hidden="true"
+          className="pointer-events-none absolute inset-0 h-full w-full overflow-visible"
+          viewBox={`0 0 ${displayWidth || 1} ${displayHeight || 1}`}
+        >
+          <polyline
+            fill="none"
+            points={polygonPoints
+              .map((point) => `${(point.x / workingWidth) * displayWidth},${(point.y / workingHeight) * displayHeight}`)
+              .join(" ")}
+            stroke={activeTool === "polygon-remove" ? "#dc2626" : "#2563eb"}
+            strokeDasharray="6 4"
+            strokeWidth="2"
+          />
+          {polygonPoints.map((point, index) => (
+            <circle
+              key={`${point.x}-${point.y}-${index}`}
+              cx={(point.x / workingWidth) * displayWidth}
+              cy={(point.y / workingHeight) * displayHeight}
+              r="4"
+              fill={activeTool === "polygon-remove" ? "#dc2626" : "#2563eb"}
+              stroke="white"
+              strokeWidth="2"
+            />
+          ))}
+        </svg>
       ) : null}
     </div>
   );
