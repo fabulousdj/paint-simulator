@@ -40,7 +40,7 @@ describe("image upload file validation", () => {
 
     const converted = await prepareImageFileForDecode(file, converter);
 
-    expect(converter).toHaveBeenCalledWith({ blob: file, toType: "image/png" });
+    expect(converter).toHaveBeenCalledWith({ blob: file, type: "image/png" });
     expect(converted.name).toBe("room.png");
     expect(converted.type).toBe("image/png");
     expect(converted.lastModified).toBe(123);

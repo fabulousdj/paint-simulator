@@ -13,7 +13,7 @@ export const UNSUPPORTED_IMAGE_TYPE_MESSAGE = "Use a JPG, PNG, WebP, HEIC, or HE
 export const DECODE_IMAGE_ERROR_MESSAGE =
   "This photo could not be decoded or converted. Choose a different JPG, PNG, WebP, HEIC, or HEIF.";
 
-type HeicConverter = (options: { blob: Blob; toType?: string; quality?: number }) => Promise<Blob | Blob[]>;
+type HeicConverter = (options: { blob: Blob; type: "image/png" }) => Promise<Blob>;
 
 function hasExtension(file: File, extensions: readonly string[]): boolean {
   const name = file.name.toLowerCase();
@@ -33,10 +33,8 @@ export function isAcceptedImageFile(file: File): boolean {
 export async function prepareImageFileForDecode(file: File, converter?: HeicConverter): Promise<File> {
   if (!isHeicImageFile(file)) return file;
 
-  const convert = converter ?? (await import("heic2any")).default;
-  const converted = await convert({ blob: file, toType: "image/png" });
-  const blob = Array.isArray(converted) ? converted[0] : converted;
-  if (!blob) throw new Error("HEIC conversion did not return an image.");
+  const convert = converter ?? (await import("heic-to")).heicTo;
+  const blob = await convert({ blob: file, type: "image/png" });
 
   const name = file.name.replace(/\.(heic|heif)$/i, "") || "room-photo";
   return new File([blob], `${name}.png`, { type: "image/png", lastModified: file.lastModified });

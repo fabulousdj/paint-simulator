@@ -1,4 +1,5 @@
 import { test, expect, type Page } from "@playwright/test";
+import { existsSync } from "node:fs";
 import { deflateSync } from "node:zlib";
 
 const crcTable = new Uint32Array(256).map((_, index) => {
@@ -114,4 +115,14 @@ test("MVP workflow uploads, masks, simulates, compares, and exports", async ({ p
 
   expect(download.suggestedFilename()).toMatch(/^chromamatch-preview-\d{8}-\d{6}\.png$/);
   expect(await download.path()).toBeTruthy();
+});
+
+test("optional local HEIC fixture uploads successfully", async ({ page }) => {
+  const heicFixturePath = process.env.CHROMAMATCH_HEIC_FIXTURE_PATH;
+  test.skip(!heicFixturePath || !existsSync(heicFixturePath), "Set CHROMAMATCH_HEIC_FIXTURE_PATH to a local HEIC file.");
+
+  await page.goto("/");
+  await page.locator('input[type="file"]').setInputFiles(heicFixturePath!);
+
+  await expect(page.getByText(/Photo loaded\. Working image prepared/)).toBeVisible({ timeout: 20_000 });
 });
