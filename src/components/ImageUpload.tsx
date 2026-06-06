@@ -1,6 +1,6 @@
 import { useCallback, useRef, useState } from "react";
 import { Upload, X } from "lucide-react";
-import { ACCEPTED_IMAGE_TYPES, UNSUPPORTED_IMAGE_TYPE_MESSAGE } from "../hooks/useEditorSession";
+import { IMAGE_UPLOAD_ACCEPT, UNSUPPORTED_IMAGE_TYPE_MESSAGE, isAcceptedImageFile } from "../hooks/useEditorSession";
 
 interface ImageUploadProps {
   onFile: (file: File) => void | Promise<void>;
@@ -19,7 +19,7 @@ export const ImageUpload = ({ onFile, hasImage, onClear, fileName, isLoading = f
 
   const handleFile = useCallback(
     (file: File) => {
-      if (!ACCEPTED_IMAGE_TYPES.includes(file.type as (typeof ACCEPTED_IMAGE_TYPES)[number])) {
+      if (!isAcceptedImageFile(file)) {
         setLocalError(UNSUPPORTED_IMAGE_TYPE_MESSAGE);
         return;
       }
@@ -77,11 +77,11 @@ export const ImageUpload = ({ onFile, hasImage, onClear, fileName, isLoading = f
         <span className="text-sm font-medium text-gray-600">
           {isLoading ? "Decoding photo locally..." : "Upload room photo"}
         </span>
-        <span className="mt-1 text-xs text-gray-400">JPG, PNG, or WebP - photos stay in your browser</span>
+        <span className="mt-1 text-xs text-gray-400">JPG, PNG, WebP, HEIC, or HEIF - photos stay in your browser</span>
         <input
           ref={inputRef}
           type="file"
-          accept="image/jpeg,image/png,image/webp"
+          accept={IMAGE_UPLOAD_ACCEPT}
           className="hidden"
           disabled={isLoading}
           onChange={(e) => {

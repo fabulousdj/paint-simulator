@@ -66,7 +66,7 @@ test("app loads and shows ChromaMatch title", async ({ page }) => {
   await expect(page).toHaveTitle(/ChromaMatch/);
   await expect(page.getByRole("heading", { name: "ChromaMatch" })).toBeVisible();
   await expect(page.getByText("Upload room photo")).toBeVisible();
-  await expect(page.getByText("JPG, PNG, or WebP - photos stay in your browser")).toBeVisible();
+  await expect(page.getByText("JPG, PNG, WebP, HEIC, or HEIF - photos stay in your browser")).toBeVisible();
   await expect(page.getByRole("heading", { name: "Current paint" })).toBeVisible();
   await expect(page.getByRole("heading", { name: "Target paint" })).toBeVisible();
   await expect(page.getByRole("heading", { name: "Dev samples" })).toBeVisible();

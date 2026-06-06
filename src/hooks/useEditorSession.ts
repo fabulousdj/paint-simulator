@@ -6,12 +6,40 @@ import { containDimensions, workingDimensions } from "../utils/coords";
 let objUrlRef: string | null = null;
 
 export const ACCEPTED_IMAGE_TYPES = ["image/jpeg", "image/png", "image/webp"] as const;
-export const UNSUPPORTED_IMAGE_TYPE_MESSAGE = "Use a JPG, PNG, or WebP room photo.";
+const HEIC_IMAGE_TYPES = ["image/heic", "image/heif"] as const;
+const HEIC_EXTENSIONS = [".heic", ".heif"] as const;
+export const IMAGE_UPLOAD_ACCEPT = "image/jpeg,image/png,image/webp,image/heic,image/heif,.heic,.heif";
+export const UNSUPPORTED_IMAGE_TYPE_MESSAGE = "Use a JPG, PNG, WebP, HEIC, or HEIF room photo.";
 export const DECODE_IMAGE_ERROR_MESSAGE =
-  "This photo could not be decoded. Choose a different JPG, PNG, or WebP.";
+  "This photo could not be decoded or converted. Choose a different JPG, PNG, WebP, HEIC, or HEIF.";
+
+type HeicConverter = (options: { blob: Blob; toType?: string; quality?: number }) => Promise<Blob | Blob[]>;
+
+function hasExtension(file: File, extensions: readonly string[]): boolean {
+  const name = file.name.toLowerCase();
+  return extensions.some((extension) => name.endsWith(extension));
+}
+
+export function isHeicImageFile(file: File): boolean {
+  const fileType = file.type.toLowerCase();
+  return HEIC_IMAGE_TYPES.includes(fileType as (typeof HEIC_IMAGE_TYPES)[number]) || hasExtension(file, HEIC_EXTENSIONS);
+}
 
 export function isAcceptedImageFile(file: File): boolean {
-  return ACCEPTED_IMAGE_TYPES.includes(file.type as (typeof ACCEPTED_IMAGE_TYPES)[number]);
+  const fileType = file.type.toLowerCase();
+  return ACCEPTED_IMAGE_TYPES.includes(fileType as (typeof ACCEPTED_IMAGE_TYPES)[number]) || isHeicImageFile(file);
+}
+
+export async function prepareImageFileForDecode(file: File, converter?: HeicConverter): Promise<File> {
+  if (!isHeicImageFile(file)) return file;
+
+  const convert = converter ?? (await import("heic2any")).default;
+  const converted = await convert({ blob: file, toType: "image/png" });
+  const blob = Array.isArray(converted) ? converted[0] : converted;
+  if (!blob) throw new Error("HEIC conversion did not return an image.");
+
+  const name = file.name.replace(/\.(heic|heif)$/i, "") || "room-photo";
+  return new File([blob], `${name}.png`, { type: "image/png", lastModified: file.lastModified });
 }
 
 export function decodeImage(file: File): Promise<HTMLImageElement> {
@@ -201,7 +229,8 @@ export function useEditorSession(containerRef: RefObject<HTMLDivElement | null>)
     dispatch({ type: "IMAGE_LOAD_START", fileName: file.name });
 
     try {
-      const img = await decodeImage(file);
+      const decodableFile = await prepareImageFileForDecode(file);
+      const img = await decodeImage(decodableFile);
       revokeObjectUrl();
       const { imageData, width, height } = createWorkingImage(img);
 
