@@ -66,15 +66,14 @@ test("app loads and shows ChromaMatch title", async ({ page }) => {
   await page.goto("/");
   await expect(page).toHaveTitle(/ChromaMatch/);
   await expect(page.getByRole("heading", { name: "ChromaMatch" })).toBeVisible();
+  await expect(page.getByRole("navigation", { name: "Guided workflow progress" })).toBeVisible();
+  await expect(page.getByRole("button", { name: /Photo/ })).toBeVisible();
+  await expect(page.getByRole("button", { name: /Wall/ })).toBeDisabled();
+  await expect(page.getByRole("button", { name: /Colors/ })).toBeDisabled();
   await expect(page.getByText("Upload room photo")).toBeVisible();
   await expect(page.getByText("JPG, PNG, WebP, HEIC, or HEIF - photos stay in your browser")).toBeVisible();
-  await expect(page.getByRole("heading", { name: "Current paint" })).toBeVisible();
-  await expect(page.getByRole("heading", { name: "Target paint" })).toBeVisible();
-  await expect(page.getByRole("heading", { name: "Dev samples" })).toBeVisible();
-  await expect(page.getByText("Local browser processing: enabled. Photos are not uploaded.")).toBeVisible();
-  await expect(page.getByLabel("Simulation mode")).toHaveValue("lab-delta-d50");
-  await expect(page.getByText(/Simulation status: idle/)).toBeVisible();
-  await expect(page.getByText("Upload a room photo.")).toBeVisible();
+  await expect(page.getByText("Local browser processing")).toBeVisible();
+  await expect(page.getByText("Upload a room photo to begin.")).toBeVisible();
 });
 
 test("MVP workflow uploads, masks, simulates, compares, and exports", async ({ page }) => {
@@ -86,11 +85,10 @@ test("MVP workflow uploads, masks, simulates, compares, and exports", async ({ p
   });
 
   await expect(page.getByText("room.png")).toBeVisible();
-  await expect(page.getByRole("button", { name: "Download PNG" })).toBeDisabled();
+  await expect(page.getByRole("button", { name: "Continue to wall selection" })).toBeEnabled();
+  await page.getByRole("button", { name: "Continue to wall selection" }).click();
 
-  await fillPaint("Current paint", "#C8CCC8", "58", page);
-  await fillPaint("Target paint", "#7589A3", "32", page);
-  await expect(page.getByText("Add a non-empty wall mask.")).toBeVisible();
+  await expect(page.getByRole("button", { name: "Continue to paint colors" })).toBeDisabled();
 
   const canvas = page.getByLabel("Uploaded room photo canvas");
   await expect(canvas).toBeVisible();
@@ -104,8 +102,17 @@ test("MVP workflow uploads, masks, simulates, compares, and exports", async ({ p
   await page.mouse.move(box.x + box.width * 0.55, box.y + box.height * 0.55, { steps: 8 });
   await page.mouse.up();
 
-  await expect(page.getByText(/Simulation status: complete/)).toBeVisible({ timeout: 10_000 });
-  await expect(page.getByText("Ready to simulate with LAB D50 delta transfer.")).toBeVisible();
+  await expect(page.getByRole("button", { name: "Continue to paint colors" })).toBeEnabled();
+  await page.getByRole("button", { name: "Continue to paint colors" }).click();
+
+  await fillPaint("Current paint", "#C8CCC8", "58", page);
+  await fillPaint("Target paint", "#7589A3", "32", page);
+
+  await expect(page.getByText("Preview ready")).toBeVisible({ timeout: 10_000 });
+  await expect(page.getByRole("navigation", { name: "Guided workflow progress" })).toBeHidden();
+  await expect(page.getByRole("button", { name: "Paints" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Edit wall" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Download PNG" })).toBeEnabled();
   await page.getByRole("button", { name: "After" }).click();
   await page.getByRole("button", { name: "Before" }).click();
 

@@ -5,19 +5,26 @@ import { normalizePaintInput } from "../utils/paint";
 type PaintInputProps = {
   title: string;
   description: string;
+  value?: PaintColor | null;
   onPaintChange: (paint: PaintColor | null) => void;
 };
 
 type InputMode = "hex" | "rgb";
 
-export function PaintInput({ title, description, onPaintChange }: PaintInputProps) {
+function paintKey(paint: PaintColor | null | undefined) {
+  return paint ? `${paint.hex}:${paint.lrv}` : "";
+}
+
+export function PaintInput({ title, description, value, onPaintChange }: PaintInputProps) {
   const id = useId();
+  const initialPaint = value ?? null;
   const [mode, setMode] = useState<InputMode>("hex");
-  const [hex, setHex] = useState("");
-  const [r, setR] = useState("");
-  const [g, setG] = useState("");
-  const [b, setB] = useState("");
-  const [lrv, setLrv] = useState("");
+  const [hex, setHex] = useState(initialPaint?.hex ?? "");
+  const [r, setR] = useState(initialPaint ? String(initialPaint.rgb.r) : "");
+  const [g, setG] = useState(initialPaint ? String(initialPaint.rgb.g) : "");
+  const [b, setB] = useState(initialPaint ? String(initialPaint.rgb.b) : "");
+  const [lrv, setLrv] = useState(initialPaint ? String(initialPaint.lrv) : "");
+  const [syncedPaintKey, setSyncedPaintKey] = useState(paintKey(initialPaint));
 
   const result = useMemo(
     () => normalizePaintInput(
@@ -37,7 +44,20 @@ export function PaintInput({ title, description, onPaintChange }: PaintInputProp
   const paint = result.ok ? result.paint : null;
 
   useEffect(() => {
+    const nextKey = paintKey(value);
+    if (!value || nextKey === syncedPaintKey) return;
+    setMode("hex");
+    setHex(value.hex);
+    setR(String(value.rgb.r));
+    setG(String(value.rgb.g));
+    setB(String(value.rgb.b));
+    setLrv(String(value.lrv));
+    setSyncedPaintKey(nextKey);
+  }, [syncedPaintKey, value]);
+
+  useEffect(() => {
     onPaintChange(paint);
+    if (paint) setSyncedPaintKey(paintKey(paint));
   }, [onPaintChange, paint]);
 
   const colorMessageId = `${id}-color-message`;

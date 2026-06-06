@@ -13,6 +13,8 @@ export type SimulationWorkerState = {
 
 type UseSimulationWorkerOptions = {
   debounceMs?: number;
+  enabled?: boolean;
+  preserveResultWhenBlocked?: boolean;
 };
 
 function maskToAlpha(mask: ProjectSession["maskImageData"]): Uint8ClampedArray | null {
@@ -41,7 +43,7 @@ export function isSimulationReady(session: ProjectSession): boolean {
 export function useSimulationWorker(
   session: ProjectSession,
   dispatch: Dispatch<SessionAction>,
-  { debounceMs = 150 }: UseSimulationWorkerOptions = {}
+  { debounceMs = 150, enabled = true, preserveResultWhenBlocked = false }: UseSimulationWorkerOptions = {}
 ): SimulationWorkerState {
   const workerRef = useRef<Worker | null>(null);
   const latestRequestId = useRef(0);
@@ -61,7 +63,12 @@ export function useSimulationWorker(
     if (!sourceImageData || !session.paintA || !session.paintB || !mask || !hasMaskCoverage(mask)) {
       latestRequestId.current += 1;
       setState({ status: sourceImageData ? "blocked" : "idle", metadata: null });
-      if (session.resultImageData) dispatch({ type: "CLEAR_RESULT_BUFFER" });
+      if (session.resultImageData && !preserveResultWhenBlocked) dispatch({ type: "CLEAR_RESULT_BUFFER" });
+      return;
+    }
+
+    if (!enabled) {
+      latestRequestId.current += 1;
       return;
     }
 
@@ -100,7 +107,7 @@ export function useSimulationWorker(
     }, debounceMs);
 
     return () => window.clearTimeout(timer);
-  }, [debounceMs, dispatch, session.image.sourceImageData, session.maskImageData, session.paintA, session.paintB, session.simulationMode]);
+  }, [debounceMs, dispatch, enabled, preserveResultWhenBlocked, session.image.sourceImageData, session.maskImageData, session.paintA, session.paintB, session.resultImageData, session.simulationMode]);
 
   return state;
 }
