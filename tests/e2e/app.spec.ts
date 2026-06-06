@@ -1,4 +1,5 @@
 import { test, expect, type Page } from "@playwright/test";
+import { existsSync } from "node:fs";
 import { deflateSync } from "node:zlib";
 
 const crcTable = new Uint32Array(256).map((_, index) => {
@@ -66,7 +67,7 @@ test("app loads and shows ChromaMatch title", async ({ page }) => {
   await expect(page).toHaveTitle(/ChromaMatch/);
   await expect(page.getByRole("heading", { name: "ChromaMatch" })).toBeVisible();
   await expect(page.getByText("Upload room photo")).toBeVisible();
-  await expect(page.getByText("JPG, PNG, or WebP - photos stay in your browser")).toBeVisible();
+  await expect(page.getByText("JPG, PNG, WebP, HEIC, or HEIF - photos stay in your browser")).toBeVisible();
   await expect(page.getByRole("heading", { name: "Current paint" })).toBeVisible();
   await expect(page.getByRole("heading", { name: "Target paint" })).toBeVisible();
   await expect(page.getByRole("heading", { name: "Dev samples" })).toBeVisible();
@@ -114,4 +115,14 @@ test("MVP workflow uploads, masks, simulates, compares, and exports", async ({ p
 
   expect(download.suggestedFilename()).toMatch(/^chromamatch-preview-\d{8}-\d{6}\.png$/);
   expect(await download.path()).toBeTruthy();
+});
+
+test("optional local HEIC fixture uploads successfully", async ({ page }) => {
+  const heicFixturePath = process.env.CHROMAMATCH_HEIC_FIXTURE_PATH;
+  test.skip(!heicFixturePath || !existsSync(heicFixturePath), "Set CHROMAMATCH_HEIC_FIXTURE_PATH to a local HEIC file.");
+
+  await page.goto("/");
+  await page.locator('input[type="file"]').setInputFiles(heicFixturePath!);
+
+  await expect(page.getByText(/Photo loaded\. Working image prepared/)).toBeVisible({ timeout: 20_000 });
 });

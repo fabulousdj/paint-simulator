@@ -2,23 +2,54 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   createWorkingImage,
   DECODE_IMAGE_ERROR_MESSAGE,
+  IMAGE_UPLOAD_ACCEPT,
+  isHeicImageFile,
   isAcceptedImageFile,
+  prepareImageFileForDecode,
   UNSUPPORTED_IMAGE_TYPE_MESSAGE,
 } from "../hooks/useEditorSession";
 
 describe("image upload file validation", () => {
-  it("accepts JPG, PNG, and WebP", () => {
+  it("accepts JPG, PNG, WebP, HEIC, and HEIF", () => {
     expect(isAcceptedImageFile(new File([""], "room.jpg", { type: "image/jpeg" }))).toBe(true);
     expect(isAcceptedImageFile(new File([""], "room.png", { type: "image/png" }))).toBe(true);
     expect(isAcceptedImageFile(new File([""], "room.webp", { type: "image/webp" }))).toBe(true);
+    expect(isAcceptedImageFile(new File([""], "room.heic", { type: "image/heic" }))).toBe(true);
+    expect(isAcceptedImageFile(new File([""], "room.HEIF", { type: "" }))).toBe(true);
+  });
+
+  it("detects HEIC and HEIF files by MIME type or extension", () => {
+    expect(isHeicImageFile(new File([""], "room.jpeg", { type: "image/heic" }))).toBe(true);
+    expect(isHeicImageFile(new File([""], "room.heif", { type: "" }))).toBe(true);
+    expect(isHeicImageFile(new File([""], "room.jpg", { type: "image/jpeg" }))).toBe(false);
   });
 
   it("rejects unsupported file types with user-facing copy", () => {
     expect(isAcceptedImageFile(new File([""], "room.gif", { type: "image/gif" }))).toBe(false);
-    expect(UNSUPPORTED_IMAGE_TYPE_MESSAGE).toBe("Use a JPG, PNG, or WebP room photo.");
+    expect(IMAGE_UPLOAD_ACCEPT).toContain(".heic");
+    expect(UNSUPPORTED_IMAGE_TYPE_MESSAGE).toBe("Use a JPG, PNG, WebP, HEIC, or HEIF room photo.");
     expect(DECODE_IMAGE_ERROR_MESSAGE).toBe(
-      "This photo could not be decoded. Choose a different JPG, PNG, or WebP."
+      "This photo could not be decoded or converted. Choose a different JPG, PNG, WebP, HEIC, or HEIF."
     );
+  });
+
+  it("converts HEIC files to PNG before decode", async () => {
+    const output = new Blob(["png"], { type: "image/png" });
+    const converter = vi.fn(async () => output);
+    const file = new File(["heic"], "room.heic", { type: "image/heic", lastModified: 123 });
+
+    const converted = await prepareImageFileForDecode(file, converter);
+
+    expect(converter).toHaveBeenCalledWith({ blob: file, type: "image/png" });
+    expect(converted.name).toBe("room.png");
+    expect(converted.type).toBe("image/png");
+    expect(converted.lastModified).toBe(123);
+  });
+
+  it("leaves browser-decodable image files unchanged", async () => {
+    const file = new File(["jpg"], "room.jpg", { type: "image/jpeg" });
+
+    await expect(prepareImageFileForDecode(file)).resolves.toBe(file);
   });
 });
 

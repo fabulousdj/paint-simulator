@@ -311,7 +311,7 @@ function App() {
             <div className="max-w-sm rounded-lg border border-gray-200 bg-white px-8 py-10 text-center shadow-sm">
               <p className="text-sm font-semibold text-gray-900">Start with a room photo</p>
               <p className="mt-2 text-sm text-gray-600">
-                Upload a JPG, PNG, or WebP. ChromaMatch decodes it locally in your browser; your photo is not uploaded.
+                Upload a JPG, PNG, WebP, HEIC, or HEIF. ChromaMatch decodes it locally in your browser; your photo is not uploaded.
               </p>
             </div>
           )}
