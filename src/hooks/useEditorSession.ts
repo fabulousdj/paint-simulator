@@ -1,7 +1,7 @@
 import { useReducer, useCallback, useEffect, type RefObject } from "react";
 import { sessionReducer, type SessionAction } from "../state/session";
 import { defaultSession, type ProjectSession } from "../types/session";
-import { containDimensions, workingDimensions } from "../utils/coords";
+import { containDimensions, WORKING_MAX, workingDimensions } from "../utils/coords";
 
 let objUrlRef: string | null = null;
 
@@ -63,7 +63,7 @@ export function revokeObjectUrl(): void {
   }
 }
 
-export function createWorkingImage(img: HTMLImageElement, maxSize: number = 2048) {
+export function createWorkingImage(img: HTMLImageElement, maxSize: number = WORKING_MAX) {
   const { w, h } = workingDimensions(img.naturalWidth, img.naturalHeight, maxSize);
 
   const canvas = document.createElement("canvas");

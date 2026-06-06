@@ -1,4 +1,4 @@
-const WORKING_MAX_DIM = 2048;
+const WORKING_MAX_DIM = 4096;
 
 /** Compute dimensions to fit the image within a container while preserving aspect ratio. */
 export function containDimensions(
