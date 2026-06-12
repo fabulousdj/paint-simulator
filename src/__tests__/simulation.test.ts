@@ -52,11 +52,11 @@ describe("simulatePaintTransfer", () => {
     expect(result.metadata.affectedPixelCount).toBe(0);
   });
 
-  it("blends partial mask values and preserves alpha", () => {
+  it("treats any non-zero mask value as selected and preserves alpha", () => {
     const source = imageData([212, 216, 215, 77]);
     const result = simulatePaintTransfer({ sourceImageData: source, mask: new Uint8ClampedArray([128]), paintA, paintB });
 
-    expect(Array.from(result.imageData.data)).toEqual([206, 210, 210, 77]);
+    expect(Array.from(result.imageData.data)).toEqual([201, 204, 205, 77]);
   });
 
   it("affects masked pixels only in a multi-pixel image", () => {

@@ -12,7 +12,6 @@ export type EdgeAwareFillOptions = {
   mode: MaskApplyMode;
   colorTolerance: number;
   edgeThreshold: number;
-  opacity: number;
 };
 
 export type PolygonMaskOptions = {
@@ -21,16 +20,7 @@ export type PolygonMaskOptions = {
   height: number;
   points: SmartMaskPoint[];
   mode: MaskApplyMode;
-  opacity: number;
 };
-
-function clampByte(value: number): number {
-  return Math.max(0, Math.min(255, Math.round(value)));
-}
-
-function clampUnit(value: number): number {
-  return Math.max(0, Math.min(1, value));
-}
 
 function pixelOffset(x: number, y: number, width: number): number {
   return (y * width + x) * 4;
@@ -56,9 +46,8 @@ function luma(color: { r: number; g: number; b: number }) {
   return 0.2126 * color.r + 0.7152 * color.g + 0.0722 * color.b;
 }
 
-function applyMaskValue(current: number, mode: MaskApplyMode, opacity: number) {
-  const value = clampByte(clampUnit(opacity) * 255);
-  return mode === "add" ? Math.max(current, value) : 0;
+function applyMaskValue(mode: MaskApplyMode) {
+  return mode === "add" ? 255 : 0;
 }
 
 export function edgeAwareAreaFill({
@@ -68,7 +57,6 @@ export function edgeAwareAreaFill({
   mode,
   colorTolerance,
   edgeThreshold,
-  opacity,
 }: EdgeAwareFillOptions): Uint8ClampedArray {
   const { width, height, data } = sourceImageData;
   const next = new Uint8ClampedArray(mask);
@@ -91,7 +79,7 @@ export function edgeAwareAreaFill({
     if (colorDistance(currentColor, seedColor) > colorTolerance) continue;
 
     const maskIndex = point.y * width + point.x;
-    next[maskIndex] = applyMaskValue(next[maskIndex] ?? 0, mode, opacity);
+    next[maskIndex] = applyMaskValue(mode);
 
     const neighbors = [
       { x: point.x + 1, y: point.y },
@@ -137,7 +125,6 @@ export function applyPolygonToMask({
   height,
   points,
   mode,
-  opacity,
 }: PolygonMaskOptions): Uint8ClampedArray {
   const next = new Uint8ClampedArray(mask);
   if (width <= 0 || height <= 0 || mask.length !== width * height || points.length < 3) return next;
@@ -151,7 +138,7 @@ export function applyPolygonToMask({
     for (let x = minX; x <= maxX; x += 1) {
       if (!pointInPolygon(x + 0.5, y + 0.5, points)) continue;
       const index = y * width + x;
-      next[index] = applyMaskValue(next[index] ?? 0, mode, opacity);
+      next[index] = applyMaskValue(mode);
     }
   }
 

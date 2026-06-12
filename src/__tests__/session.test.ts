@@ -15,7 +15,6 @@ describe("default session", () => {
 
   it("has sensible brush defaults", () => {
     expect(defaultSession.brush.sizePx).toBe(32);
-    expect(defaultSession.brush.opacity).toBe(1);
     expect(defaultSession.brush.mode).toBe("paint");
   });
 });

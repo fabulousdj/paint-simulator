@@ -17,6 +17,7 @@
     "test:e2e:ui": "playwright test --ui"
   },
   "dependencies": {
+    "@huggingface/transformers": "^4.2.0",
     "heic-to": "^1.5.2",
     "lucide-react": "^0.487.0",
     "react": "^19.1.0",

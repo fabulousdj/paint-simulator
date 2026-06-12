@@ -19,7 +19,6 @@ export type SessionAction =
   | { type: "SET_DISPLAY_SIZE"; displayW: number; displayH: number }
   | { type: "SET_SIMULATION_MODE"; mode: SimulationMode }
   | { type: "SET_BRUSH_SIZE"; size: number }
-  | { type: "SET_BRUSH_OPACITY"; opacity: number }
   | { type: "SET_BRUSH_MODE"; mode: "paint" | "erase" }
   | { type: "RESET_SESSION" };
 
@@ -90,12 +89,6 @@ export function sessionReducer(
         brush: { ...state.brush, sizePx: action.size },
       };
 
-    case "SET_BRUSH_OPACITY":
-      return {
-        ...state,
-        brush: { ...state.brush, opacity: action.opacity },
-      };
-
     case "SET_BRUSH_MODE":
       return {
         ...state,
@@ -117,7 +110,7 @@ export function sessionReducer(
         paintA: null,
         paintB: null,
         simulationMode: "lab-delta-d50",
-        brush: { sizePx: 32, opacity: 1, mode: "paint" },
+        brush: { sizePx: 32, mode: "paint" },
       };
 
     default:
