@@ -58,11 +58,11 @@ describe("createWorkingImage", () => {
     vi.restoreAllMocks();
   });
 
-  it("bounds working image data at 4096px on the longest side", () => {
+  it("bounds working image data at 2048px on the longest side", () => {
     const imageData = {
-      width: 4096,
-      height: 3072,
-      data: new Uint8ClampedArray(4096 * 3072 * 4),
+      width: 2048,
+      height: 1536,
+      data: new Uint8ClampedArray(2048 * 1536 * 4),
       colorSpace: "srgb",
     } as ImageData;
     const drawImage = vi.fn();
@@ -80,10 +80,10 @@ describe("createWorkingImage", () => {
 
     const working = createWorkingImage(img);
 
-    expect(working.width).toBe(4096);
-    expect(working.height).toBe(3072);
+    expect(working.width).toBe(2048);
+    expect(working.height).toBe(1536);
     expect(working.imageData).toBe(imageData);
-    expect(drawImage).toHaveBeenCalledWith(img, 0, 0, 4096, 3072);
-    expect(getImageData).toHaveBeenCalledWith(0, 0, 4096, 3072);
+    expect(drawImage).toHaveBeenCalledWith(img, 0, 0, 2048, 1536);
+    expect(getImageData).toHaveBeenCalledWith(0, 0, 2048, 1536);
   });
 });

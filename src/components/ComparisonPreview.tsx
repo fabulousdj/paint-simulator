@@ -6,12 +6,14 @@ export type ToggleViewMode = "before" | "after";
 type ComparisonPreviewProps = {
   sourceImageData: ImageData;
   resultImageData: ImageData | Uint8ClampedArray | null;
+  mask: ImageData | Uint8ClampedArray | null;
   workingWidth: number;
   workingHeight: number;
   displayWidth: number;
   displayHeight: number;
   mode: PreviewMode;
   toggleViewMode: ToggleViewMode;
+  showMaskOverlay?: boolean;
 };
 
 function resultToImageData(result: ImageData | Uint8ClampedArray | null, width: number, height: number): ImageData | null {
@@ -46,15 +48,49 @@ function drawImageData(
   ctx.drawImage(sourceCanvas, 0, 0, displayWidth, displayHeight);
 }
 
+function maskToAlpha(mask: ImageData | Uint8ClampedArray | null, width: number, height: number) {
+  if (!mask) return null;
+  if (mask instanceof Uint8ClampedArray) return mask.length === width * height ? mask : null;
+  if (mask.width !== width || mask.height !== height) return null;
+
+  const alpha = new Uint8ClampedArray(width * height);
+  for (let i = 0; i < alpha.length; i += 1) alpha[i] = mask.data[i * 4 + 3] ?? 0;
+  return alpha;
+}
+
+function createMaskOverlayCanvas(mask: ImageData | Uint8ClampedArray | null, width: number, height: number) {
+  const alpha = maskToAlpha(mask, width, height);
+  if (!alpha) return null;
+
+  const overlayCanvas = document.createElement("canvas");
+  overlayCanvas.width = width;
+  overlayCanvas.height = height;
+  const overlayCtx = overlayCanvas.getContext("2d");
+  if (!overlayCtx) return null;
+
+  const overlay = overlayCtx.createImageData(width, height);
+  for (let i = 0; i < alpha.length; i += 1) {
+    const pixel = i * 4;
+    overlay.data[pixel] = 37;
+    overlay.data[pixel + 1] = 99;
+    overlay.data[pixel + 2] = 235;
+    overlay.data[pixel + 3] = Math.round((alpha[i] ?? 0) * 0.35);
+  }
+  overlayCtx.putImageData(overlay, 0, 0);
+  return overlayCanvas;
+}
+
 export function ComparisonPreview({
   sourceImageData,
   resultImageData,
+  mask,
   workingWidth,
   workingHeight,
   displayWidth,
   displayHeight,
   mode,
   toggleViewMode,
+  showMaskOverlay = false,
 }: ComparisonPreviewProps) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const beforeCanvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -87,12 +123,14 @@ export function ComparisonPreview({
     resultCanvas.height = workingHeight;
     const resultCtx = resultCanvas.getContext("2d");
     if (result && resultCtx) resultCtx.putImageData(result, 0, 0);
+    const overlayCanvas = showMaskOverlay ? createMaskOverlayCanvas(mask, workingWidth, workingHeight) : null;
 
     ctx.clearRect(0, 0, canvas.width, canvas.height);
 
     if (mode === "toggle") {
       const activeCanvas = toggleViewMode === "after" && result ? resultCanvas : sourceCanvas;
       ctx.drawImage(activeCanvas, 0, 0, displayWidth, displayHeight);
+      if (overlayCanvas) ctx.drawImage(overlayCanvas, 0, 0, displayWidth, displayHeight);
       return;
     }
 
@@ -115,7 +153,8 @@ export function ComparisonPreview({
       ctx.fill();
       ctx.stroke();
     }
-  }, [displayHeight, displayWidth, mode, result, sourceImageData, splitRatio, toggleViewMode, workingHeight, workingWidth]);
+    if (overlayCanvas) ctx.drawImage(overlayCanvas, 0, 0, displayWidth, displayHeight);
+  }, [displayHeight, displayWidth, mask, mode, result, showMaskOverlay, sourceImageData, splitRatio, toggleViewMode, workingHeight, workingWidth]);
 
   useEffect(() => {
     if (mode !== "side-by-side") return;

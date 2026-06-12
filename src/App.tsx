@@ -32,25 +32,6 @@ function samePaint(a: PaintColor | null, b: PaintColor | null) {
   return a.hex === b.hex && a.lrv === b.lrv;
 }
 
-function maskSignature(mask: ImageData | Uint8ClampedArray | null, width: number, height: number) {
-  if (!mask || width <= 0 || height <= 0) return "mask:none";
-  let hash = 2166136261;
-  let selected = 0;
-  const update = (value: number) => {
-    if (value > 0) selected += 1;
-    hash ^= value;
-    hash = Math.imul(hash, 16777619) >>> 0;
-  };
-
-  if (mask instanceof Uint8ClampedArray) {
-    for (let i = 0; i < mask.length; i += 1) update(mask[i] ?? 0);
-    return `mask:${mask.length}:${selected}:${hash}`;
-  }
-
-  for (let i = 3; i < mask.data.length; i += 4) update(mask.data[i] ?? 0);
-  return `mask:${mask.width}x${mask.height}:${selected}:${hash}`;
-}
-
 function paintSignature(paint: PaintColor | null) {
   if (!paint) return "paint:none";
   return [paint.hex, paint.rgb.r, paint.rgb.g, paint.rgb.b, paint.lrv].join(":");
@@ -58,6 +39,7 @@ function paintSignature(paint: PaintColor | null) {
 
 function App() {
   const workspaceRef = useRef<HTMLDivElement | null>(null);
+  const previewStartTimerRef = useRef<number | null>(null);
   const [guidedStep, setGuidedStep] = useState<GuidedStep>("photo");
   const [firstPreviewComplete, setFirstPreviewComplete] = useState(false);
   const [isWallEditMode, setIsWallEditMode] = useState(false);
@@ -70,6 +52,8 @@ function App() {
   const [maskHistory, setMaskHistory] = useState<MaskHistory>(emptyMaskHistory);
   const [viewMode, setViewMode] = useState<CanvasViewMode>("after");
   const [latestPreviewSignature, setLatestPreviewSignature] = useState<string | null>(null);
+  const [maskRevision, setMaskRevision] = useState(0);
+  const [isPreviewStartPending, setIsPreviewStartPending] = useState(false);
   const [previewRunKey, setPreviewRunKey] = useState(0);
   const [completedRunKey, setCompletedRunKey] = useState(0);
   const [exportError, setExportError] = useState<string | null>(null);
@@ -83,20 +67,22 @@ function App() {
     if (!readiness.canSimulate) return null;
     return [
       `image:${workingWidth}x${workingHeight}:${sourceImageData?.data.length ?? 0}`,
-      maskSignature(state.session.maskImageData, workingWidth, workingHeight),
+      `mask:${maskRevision}`,
       paintSignature(state.session.paintA),
       paintSignature(state.session.paintB),
       `mode:${state.session.simulationMode}`,
     ].join("|");
-  }, [readiness.canSimulate, sourceImageData, state.session.maskImageData, state.session.paintA, state.session.paintB, state.session.simulationMode, workingHeight, workingWidth]);
+  }, [maskRevision, readiness.canSimulate, sourceImageData, state.session.paintA, state.session.paintB, state.session.simulationMode, workingHeight, workingWidth]);
   const pendingManualPreview = previewRunKey > completedRunKey;
-  const shouldRunSimulation = readiness.canSimulate && (!firstPreviewComplete || pendingManualPreview);
+  const shouldRunSimulation = readiness.canSimulate && pendingManualPreview;
   const simulation = useSimulationWorker(state.session, dispatch, {
     enabled: shouldRunSimulation,
     preserveResultWhenBlocked: firstPreviewComplete,
+    runKey: previewRunKey,
   });
+  const previewIsRendering = isPreviewStartPending || simulation.status === "running";
   const previewNeedsUpdate = firstPreviewComplete && latestPreviewSignature !== currentPreviewSignature;
-  const canDownload = firstPreviewComplete && !previewNeedsUpdate && readiness.canExport && simulation.status === "complete";
+  const canDownload = firstPreviewComplete && !previewNeedsUpdate && !previewIsRendering && readiness.canExport && simulation.status === "complete";
   const displayViewMode: CanvasViewMode = state.session.resultImageData && (viewMode === "after" || previewMode !== "toggle") ? "after" : "before";
 
   useEffect(() => {
@@ -104,14 +90,28 @@ function App() {
   }, [state.session.resultImageData, viewMode]);
 
   useEffect(() => {
-    if (!shouldRunSimulation || simulation.status !== "complete" || !state.session.resultImageData) return;
+    if (simulation.status !== "complete" || simulation.requestId === 0 || !state.session.resultImageData) return;
+    if (simulation.runKey !== previewRunKey || previewRunKey <= completedRunKey) return;
     setFirstPreviewComplete(true);
     setGuidedStep("preview");
     setIsWallEditMode(false);
     setLatestPreviewSignature(currentPreviewSignature);
     setCompletedRunKey(previewRunKey);
+    setIsPreviewStartPending(false);
     setViewMode("after");
-  }, [currentPreviewSignature, previewRunKey, shouldRunSimulation, simulation.status, state.session.resultImageData]);
+  }, [completedRunKey, currentPreviewSignature, previewRunKey, simulation.requestId, simulation.runKey, simulation.status, state.session.resultImageData]);
+
+  useEffect(() => {
+    return () => {
+      if (previewStartTimerRef.current !== null) window.clearTimeout(previewStartTimerRef.current);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (simulation.status === "error" || simulation.status === "blocked") {
+      setIsPreviewStartPending(false);
+    }
+  }, [simulation.status]);
 
   const setPaintA = useCallback(
     (paint: PaintColor | null) => {
@@ -135,6 +135,7 @@ function App() {
     setIsPaintDrawerOpen(false);
     setGuidedStep("photo");
     setLatestPreviewSignature(null);
+    setMaskRevision(0);
     setPreviewRunKey(0);
     setCompletedRunKey(0);
     setViewMode("before");
@@ -169,6 +170,7 @@ function App() {
       const previous = currentMask();
       setMaskHistory((history) => pushMaskHistory(history, previous, mask));
       dispatch({ type: "SET_MASK_BUFFER", buffer: mask });
+      setMaskRevision((revision) => revision + 1);
     },
     [currentMask, dispatch]
   );
@@ -186,6 +188,7 @@ function App() {
     setPolygonPoints([]);
     setMaskHistory(result.history);
     dispatch({ type: "SET_MASK_BUFFER", buffer: result.mask });
+    setMaskRevision((revision) => revision + 1);
   }, [currentMask, dispatch, maskHistory]);
 
   const redoMask = useCallback(() => {
@@ -194,6 +197,7 @@ function App() {
     setPolygonPoints([]);
     setMaskHistory(result.history);
     dispatch({ type: "SET_MASK_BUFFER", buffer: result.mask });
+    setMaskRevision((revision) => revision + 1);
   }, [currentMask, dispatch, maskHistory]);
 
   const selectTool = useCallback(
@@ -243,9 +247,16 @@ function App() {
     setPolygonPoints([]);
   }, [activeTool, commitMaskChange, currentMask, polygonPoints, state.session.brush.opacity, state.session.image]);
 
-  const requestPreviewUpdate = useCallback(() => {
+  const beginPreviewRender = useCallback(() => {
     if (!readiness.canSimulate) return;
-    setPreviewRunKey((key) => key + 1);
+    setIsPaintDrawerOpen(false);
+    setIsWallEditMode(false);
+    setIsPreviewStartPending(true);
+    if (previewStartTimerRef.current !== null) window.clearTimeout(previewStartTimerRef.current);
+    previewStartTimerRef.current = window.setTimeout(() => {
+      previewStartTimerRef.current = null;
+      setPreviewRunKey((key) => key + 1);
+    }, 50);
   }, [readiness.canSimulate]);
 
   const setSimulationMode = useCallback(
@@ -352,11 +363,47 @@ function App() {
         brush={state.session.brush}
         activeTool={activeTool}
         viewMode={displayViewMode}
-        showMaskOverlay={showMaskOverlay && (isWallEditMode || !firstPreviewComplete)}
+        showMaskOverlay={showMaskOverlay && (isWallEditMode || !firstPreviewComplete || simulation.status === "running")}
         polygonPoints={polygonPoints}
         onMaskCommit={commitMaskChange}
         onAreaFill={fillArea}
         onPolygonPoint={addPolygonPoint}
+      />
+    );
+  };
+
+  const renderPhotoStepPreview = () => {
+    if (upload.isLoading || !hasImage || !state.session.image.sourceImageData) return renderCanvas();
+
+    return (
+      <ComparisonPreview
+        sourceImageData={state.session.image.sourceImageData}
+        resultImageData={null}
+        mask={null}
+        workingWidth={state.session.image.workingWidth}
+        workingHeight={state.session.image.workingHeight}
+        displayWidth={state.session.image.displayWidth}
+        displayHeight={state.session.image.displayHeight}
+        mode="toggle"
+        toggleViewMode="before"
+      />
+    );
+  };
+
+  const renderRenderingPreviewSurface = () => {
+    if (!hasImage || !state.session.image.sourceImageData) return renderCanvas();
+
+    return (
+      <ComparisonPreview
+        sourceImageData={state.session.image.sourceImageData}
+        resultImageData={null}
+        mask={state.session.maskImageData}
+        workingWidth={state.session.image.workingWidth}
+        workingHeight={state.session.image.workingHeight}
+        displayWidth={state.session.image.displayWidth}
+        displayHeight={state.session.image.displayHeight}
+        mode="toggle"
+        toggleViewMode="before"
       />
     );
   };
@@ -441,6 +488,10 @@ function App() {
   };
 
   const renderGuidedPrimary = () => {
+    if (previewIsRendering) return renderRenderingPreviewSurface();
+
+    if (guidedStep === "photo") return renderPhotoStepPreview();
+
     if (guidedStep === "colors") {
       return (
         <div className="w-full max-w-3xl rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
@@ -492,17 +543,18 @@ function App() {
     if (guidedStep === "colors") {
       const status = !hasPaints
         ? "Enter valid current and target paint colors to generate the first preview."
-        : simulation.status === "running"
+        : previewIsRendering
           ? "Generating first preview locally..."
           : readiness.canSimulate
-            ? "First preview will generate automatically."
+            ? "Paint colors are ready. Generate the first preview when you are ready."
             : readiness.blockers.map((blocker) => blocker.message).join(" ");
       return (
         <FooterBar
           status={status}
-          primaryLabel={simulation.status === "running" ? "Generating preview..." : "Waiting for valid colors"}
-          primaryDisabled
+          primaryLabel={previewIsRendering ? "Generating preview..." : readiness.canSimulate ? "Generate preview" : "Complete paint colors"}
+          primaryDisabled={!readiness.canSimulate || previewIsRendering}
           primaryClass={primaryButtonClass}
+          onPrimary={beginPreviewRender}
         />
       );
     }
@@ -528,13 +580,14 @@ function App() {
       </div>
       <StatusChip
         className="absolute right-4 top-4 z-10"
-        label={simulation.status === "running" ? "Updating locally" : previewNeedsUpdate ? "Preview needs update" : "Preview ready"}
-        tone={simulation.status === "running" ? "blue" : previewNeedsUpdate ? "amber" : "green"}
+        label={previewIsRendering ? "Updating locally" : previewNeedsUpdate ? "Preview needs update" : "Preview ready"}
+        tone={previewIsRendering ? "blue" : previewNeedsUpdate ? "amber" : "green"}
       />
-      {hasImage && state.session.image.sourceImageData ? (
+      {previewIsRendering ? renderRenderingPreviewSurface() : hasImage && state.session.image.sourceImageData ? (
         <ComparisonPreview
           sourceImageData={state.session.image.sourceImageData}
-          resultImageData={state.session.resultImageData}
+          resultImageData={previewIsRendering ? null : state.session.resultImageData}
+          mask={state.session.maskImageData}
           workingWidth={state.session.image.workingWidth}
           workingHeight={state.session.image.workingHeight}
           displayWidth={state.session.image.displayWidth}
@@ -543,12 +596,13 @@ function App() {
           toggleViewMode={viewMode}
         />
       ) : renderCanvas()}
+      {previewIsRendering ? <RenderingOverlay /> : null}
       {isPaintDrawerOpen ? (
         <PaintDrawer
-          canUpdate={readiness.canSimulate && previewNeedsUpdate && simulation.status !== "running"}
+          canUpdate={readiness.canSimulate && previewNeedsUpdate && !previewIsRendering}
           metadata={simulation.metadata}
           onClose={() => setIsPaintDrawerOpen(false)}
-          onUpdate={requestPreviewUpdate}
+          onUpdate={beginPreviewRender}
           paintA={state.session.paintA}
           paintB={state.session.paintB}
           previewNeedsUpdate={previewNeedsUpdate}
@@ -557,7 +611,7 @@ function App() {
           setPaintB={setPaintB}
           setSimulationMode={setSimulationMode}
           simulationMode={state.session.simulationMode}
-          simulationStatus={simulation.status}
+          simulationStatus={isPreviewStartPending ? "starting" : simulation.status}
           workingHeight={state.session.image.workingHeight}
           workingWidth={state.session.image.workingWidth}
         />
@@ -586,15 +640,15 @@ function App() {
             Local only
           </span>
           <StatusChip
-            label={firstPreviewComplete ? simulation.status === "running" ? "Updating" : previewNeedsUpdate ? "Needs update" : "Preview ready" : hasImage ? "Photo loaded" : "No photo"}
-            tone={firstPreviewComplete && simulation.status === "running" ? "blue" : firstPreviewComplete && previewNeedsUpdate ? "amber" : firstPreviewComplete ? "green" : "blue"}
+            label={firstPreviewComplete ? previewIsRendering ? "Updating" : previewNeedsUpdate ? "Needs update" : "Preview ready" : hasImage ? "Photo loaded" : "No photo"}
+            tone={firstPreviewComplete && previewIsRendering ? "blue" : firstPreviewComplete && previewNeedsUpdate ? "amber" : firstPreviewComplete ? "green" : "blue"}
           />
           <div className="ml-auto flex flex-wrap items-center gap-2">
             {firstPreviewComplete ? (
               <>
                 <button type="button" className={actionButtonClass} onClick={() => setIsPaintDrawerOpen(true)}>Paints</button>
                 <button type="button" className={actionButtonClass} onClick={() => { setIsWallEditMode(true); setIsPaintDrawerOpen(false); setShowMaskOverlay(true); }}>Edit wall</button>
-                {previewNeedsUpdate ? <button type="button" className={primaryButtonClass} disabled={!readiness.canSimulate || simulation.status === "running"} onClick={requestPreviewUpdate}>Update preview</button> : null}
+                {previewNeedsUpdate ? <button type="button" className={primaryButtonClass} disabled={!readiness.canSimulate || previewIsRendering} onClick={beginPreviewRender}>Update preview</button> : null}
                 <button type="button" className={actionButtonClass} disabled={!canDownload} onClick={downloadResult}>Download PNG</button>
                 <button type="button" className={actionButtonClass} onClick={clearImage}>New photo</button>
               </>
@@ -613,6 +667,7 @@ function App() {
         <div className="flex min-h-0 flex-1 overflow-hidden">
           <section ref={workspaceRef} className="relative flex min-h-0 flex-1 items-center justify-center overflow-hidden bg-slate-100 p-4 md:p-6">
             {isWallEditMode ? renderWallEditMode() : firstPreviewComplete ? renderActiveEditor() : renderGuidedPrimary()}
+            {previewIsRendering && !isWallEditMode && !firstPreviewComplete ? <RenderingOverlay /> : null}
           </section>
           {!firstPreviewComplete && !isWallEditMode ? renderGuidedAside() : null}
           {isWallEditMode ? renderMaskTools() : null}
@@ -705,6 +760,18 @@ function StatusChip({ label, tone, className }: { label: string; tone: "blue" | 
     amber: "border-amber-100 bg-amber-50 text-amber-800",
   }[tone];
   return <span className={cx("inline-flex min-h-8 items-center rounded-full border px-3 text-xs font-semibold", toneClass, className)}>{label}</span>;
+}
+
+function RenderingOverlay() {
+  return (
+    <div className="absolute inset-0 z-10 flex items-center justify-center bg-slate-950/10 backdrop-blur-[1px]">
+      <div className="rounded-2xl border border-slate-200 bg-white/95 px-6 py-5 text-center shadow-xl">
+        <div className="mx-auto h-8 w-8 animate-spin rounded-full border-4 border-teal-100 border-t-teal-700" aria-hidden="true" />
+        <p className="mt-3 text-sm font-semibold text-slate-900">Rendering new paint locally...</p>
+        <p className="mt-1 text-xs text-slate-500">Using the current wall mask and paint values.</p>
+      </div>
+    </div>
+  );
 }
 
 function SwatchCard({ label, paint }: { label: string; paint: PaintColor | null }) {

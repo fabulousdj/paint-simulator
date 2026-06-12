@@ -7,9 +7,9 @@ import {
 } from "../utils/coords";
 
 describe("workingDimensions", () => {
-  it("caps the longest side at 4096 by default", () => {
-    expect(workingDimensions(8192, 4096)).toEqual({ w: 4096, h: 2048 });
-    expect(workingDimensions(5712, 4284)).toEqual({ w: 4096, h: 3072 });
+  it("caps the longest side at 2048 by default", () => {
+    expect(workingDimensions(8192, 4096)).toEqual({ w: 2048, h: 1024 });
+    expect(workingDimensions(5712, 4284)).toEqual({ w: 2048, h: 1536 });
   });
 
   it("does not upscale small images", () => {

@@ -33,7 +33,7 @@ Rules:
 - Completed previous steps are clickable and editable.
 - Future invalid steps are locked.
 - Uploading a new photo resets the journey.
-- The first valid color pair should auto-generate the first preview.
+- The first valid color pair unlocks a Generate preview action. Do not render until the user clicks it.
 - Once the first preview completes, transition to Active Editor mode.
 
 ### Mode 2: Active Editor
@@ -174,7 +174,7 @@ Trust note:
 
 CTA behavior:
 
-- First valid Current and Target pair auto-generates the first preview.
+- First valid Current and Target pair enables Generate preview.
 - While generating, CTA reads Generating preview locally and is disabled.
 - If generation fails, show error and allow Retry.
 - Once the first preview is ready, move to the First Preview screen.
@@ -342,7 +342,7 @@ States:
 
 CTA mapping:
 
-- No preview with valid inputs: Generate preview or auto-generate during first run.
+- No preview with valid inputs: enable Generate preview.
 - Generating: disable Download and Update Preview.
 - Ready: enable Download PNG.
 - Needs update: enable Update Preview, disable Download PNG.
@@ -392,5 +392,5 @@ Default users should not need this section to complete the workflow.
 - Existing controls can be reorganized into guided screens, then reused in the active editor drawer and dedicated wall mode.
 - The state model needs a durable flag for whether the current photo has completed its first preview.
 - Preview freshness should be derived from the current image, mask, paint inputs, and the inputs used to generate the latest result.
-- The first preview should auto-run once image, mask, Paint A, and Paint B are valid.
+- The first preview should run only after the user clicks Generate preview once image, mask, Paint A, and Paint B are valid.
 - After the first preview, paint and mask changes should require explicit Update Preview.

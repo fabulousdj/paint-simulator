@@ -8,6 +8,8 @@ type SimulationStatus = "idle" | "blocked" | "running" | "complete" | "error";
 
 export type SimulationWorkerState = {
   status: SimulationStatus;
+  requestId: number;
+  runKey: number;
   metadata: SimulationMetadata | null;
 };
 
@@ -15,6 +17,7 @@ type UseSimulationWorkerOptions = {
   debounceMs?: number;
   enabled?: boolean;
   preserveResultWhenBlocked?: boolean;
+  runKey?: number;
 };
 
 function maskToAlpha(mask: ProjectSession["maskImageData"]): Uint8ClampedArray | null {
@@ -43,11 +46,11 @@ export function isSimulationReady(session: ProjectSession): boolean {
 export function useSimulationWorker(
   session: ProjectSession,
   dispatch: Dispatch<SessionAction>,
-  { debounceMs = 150, enabled = true, preserveResultWhenBlocked = false }: UseSimulationWorkerOptions = {}
+  { debounceMs = 150, enabled = true, preserveResultWhenBlocked = false, runKey = 0 }: UseSimulationWorkerOptions = {}
 ): SimulationWorkerState {
   const workerRef = useRef<Worker | null>(null);
   const latestRequestId = useRef(0);
-  const [state, setState] = useState<SimulationWorkerState>({ status: "idle", metadata: null });
+  const [state, setState] = useState<SimulationWorkerState>({ status: "idle", requestId: 0, runKey: 0, metadata: null });
 
   useEffect(() => {
     return () => {
@@ -62,7 +65,7 @@ export function useSimulationWorker(
 
     if (!sourceImageData || !session.paintA || !session.paintB || !mask || !hasMaskCoverage(mask)) {
       latestRequestId.current += 1;
-      setState({ status: sourceImageData ? "blocked" : "idle", metadata: null });
+      setState({ status: sourceImageData ? "blocked" : "idle", requestId: latestRequestId.current, runKey, metadata: null });
       if (session.resultImageData && !preserveResultWhenBlocked) dispatch({ type: "CLEAR_RESULT_BUFFER" });
       return;
     }
@@ -74,40 +77,55 @@ export function useSimulationWorker(
 
     const requestId = latestRequestId.current + 1;
     latestRequestId.current = requestId;
-    setState((current) => ({ status: "running", metadata: current.metadata }));
+    setState((current) => ({ status: "running", requestId, runKey, metadata: current.metadata }));
 
     const timer = window.setTimeout(() => {
-      if (!workerRef.current) {
-        workerRef.current = new Worker(new URL("../workers/simulationWorker.ts", import.meta.url), {
-          type: "module",
-        });
-      }
+      workerRef.current?.terminate();
+      const worker = new Worker(new URL("../workers/simulationWorker.ts", import.meta.url), {
+        type: "module",
+      });
+      workerRef.current = worker;
 
-      workerRef.current.onmessage = (event: MessageEvent<SimulationWorkerResponse>) => {
-        if (event.data.requestId !== latestRequestId.current) return;
+      const releaseWorker = () => {
+        worker.terminate();
+        if (workerRef.current === worker) workerRef.current = null;
+      };
+
+      worker.onmessage = (event: MessageEvent<SimulationWorkerResponse>) => {
+        const isLatest = event.data.requestId === latestRequestId.current;
+        releaseWorker();
+        if (!isLatest) return;
         dispatch({ type: "SET_RESULT_BUFFER", buffer: event.data.imageData.data });
-        setState({ status: "complete", metadata: event.data.metadata });
+        setState({ status: "complete", requestId, runKey, metadata: event.data.metadata });
       };
 
-      workerRef.current.onerror = () => {
-        if (requestId !== latestRequestId.current) return;
-        setState({ status: "error", metadata: null });
+      worker.onerror = () => {
+        const isLatest = requestId === latestRequestId.current;
+        releaseWorker();
+        if (!isLatest) return;
+        setState({ status: "error", requestId, runKey, metadata: null });
       };
+
+      const transferMask = new Uint8ClampedArray(mask);
 
       const request: SimulationWorkerRequest = {
         requestId,
         sourceImageData,
-        mask: new Uint8ClampedArray(mask),
+        mask: transferMask,
         paintA: session.paintA!,
         paintB: session.paintB!,
         mode: session.simulationMode,
       };
 
-      workerRef.current.postMessage(request);
+      worker.postMessage(request, [transferMask.buffer]);
     }, debounceMs);
 
-    return () => window.clearTimeout(timer);
-  }, [debounceMs, dispatch, enabled, preserveResultWhenBlocked, session.image.sourceImageData, session.maskImageData, session.paintA, session.paintB, session.resultImageData, session.simulationMode]);
+    return () => {
+      window.clearTimeout(timer);
+      workerRef.current?.terminate();
+      workerRef.current = null;
+    };
+  }, [debounceMs, dispatch, enabled, preserveResultWhenBlocked, runKey, session.image.sourceImageData, session.maskImageData, session.paintA, session.paintB, session.simulationMode]);
 
   return state;
 }

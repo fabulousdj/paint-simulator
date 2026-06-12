@@ -107,6 +107,8 @@ test("MVP workflow uploads, masks, simulates, compares, and exports", async ({ p
 
   await fillPaint("Current paint", "#C8CCC8", "58", page);
   await fillPaint("Target paint", "#7589A3", "32", page);
+  await expect(page.getByRole("button", { name: "Generate preview" })).toBeEnabled();
+  await page.getByRole("button", { name: "Generate preview" }).click();
 
   await expect(page.getByText("Preview ready")).toBeVisible({ timeout: 10_000 });
   await expect(page.getByRole("navigation", { name: "Guided workflow progress" })).toBeHidden();
