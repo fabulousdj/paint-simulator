@@ -17,14 +17,6 @@ export type DirtyBounds = {
   maxY: number;
 };
 
-function clampByte(value: number): number {
-  return Math.max(0, Math.min(255, Math.round(value)));
-}
-
-function clampUnit(value: number): number {
-  return Math.max(0, Math.min(1, value));
-}
-
 function unionBounds(a: DirtyBounds | null, b: DirtyBounds | null): DirtyBounds | null {
   if (!a) return b;
   if (!b) return a;
@@ -73,9 +65,6 @@ export function applyMaskBrushInPlace(
   if (width <= 0 || height <= 0 || mask.length !== width * height) return null;
 
   const radius = Math.max(0.5, options.sizePx / 2);
-  const opacityValue = clampByte(clampUnit(options.opacity) * 255);
-  if (opacityValue <= 0) return null;
-
   const centerX = Math.round(options.x);
   const centerY = Math.round(options.y);
   const minX = Math.max(0, Math.floor(centerX - radius));
@@ -93,9 +82,7 @@ export function applyMaskBrushInPlace(
 
       const index = y * width + x;
       const current = mask[index] ?? 0;
-      const nextValue = options.mode === "erase"
-        ? clampByte(current - opacityValue)
-        : Math.max(current, opacityValue);
+      const nextValue = options.mode === "erase" ? 0 : 255;
       if (nextValue === current) continue;
 
       mask[index] = nextValue;

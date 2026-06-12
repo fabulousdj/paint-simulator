@@ -113,8 +113,7 @@ export function simulatePaintTransfer({
   }
 
   for (let pixelIndex = 0; pixelIndex < mask.length; pixelIndex += 1) {
-    const alpha = (mask[pixelIndex] ?? 0) / 255;
-    if (alpha <= 0) continue;
+    if ((mask[pixelIndex] ?? 0) <= 0) continue;
 
     const sourceIndex = pixelIndex * 4;
     const observed = rgbToImageDataPixel(source, sourceIndex);
@@ -122,9 +121,9 @@ export function simulatePaintTransfer({
       ? simulateRgbRatioPixel(observed, paintA, paintB)
       : simulateLabPixel(observed, paintA, paintB);
 
-    result[sourceIndex] = clampByte(observed.r * (1 - alpha) + simulated.rgb.r * alpha);
-    result[sourceIndex + 1] = clampByte(observed.g * (1 - alpha) + simulated.rgb.g * alpha);
-    result[sourceIndex + 2] = clampByte(observed.b * (1 - alpha) + simulated.rgb.b * alpha);
+    result[sourceIndex] = simulated.rgb.r;
+    result[sourceIndex + 1] = simulated.rgb.g;
+    result[sourceIndex + 2] = simulated.rgb.b;
     result[sourceIndex + 3] = source[sourceIndex + 3] ?? 255;
 
     metadata.affectedPixelCount += 1;

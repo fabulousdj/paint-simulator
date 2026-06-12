@@ -31,7 +31,6 @@ export type SimulationMode = "lab-delta-d50" | "rgb-ratio-debug";
 
 export type BrushState = {
   sizePx: number;
-  opacity: number;
   mode: "paint" | "erase";
 };
 
@@ -70,7 +69,6 @@ export const defaultSession: ProjectSession = {
   simulationMode: "lab-delta-d50",
   brush: {
     sizePx: 32,
-    opacity: 1,
     mode: "paint",
   },
 };

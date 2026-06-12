@@ -47,7 +47,6 @@ describe("edgeAwareAreaFill", () => {
       mode: "add",
       colorTolerance: 8,
       edgeThreshold: 30,
-      opacity: 1,
     });
 
     expect(Array.from(next)).toEqual([
@@ -68,7 +67,6 @@ describe("edgeAwareAreaFill", () => {
       mode: "remove",
       colorTolerance: 5,
       edgeThreshold: 20,
-      opacity: 1,
     });
 
     expect(Array.from(next)).toEqual([0, 0, 255]);
@@ -89,10 +87,9 @@ describe("applyPolygonToMask", () => {
         { x: 1, y: 4 },
       ],
       mode: "add",
-      opacity: 0.5,
     });
 
-    expect(next[2 + 2 * 5]).toBe(128);
+    expect(next[2 + 2 * 5]).toBe(255);
     expect(next[0]).toBe(0);
   });
 
@@ -109,7 +106,6 @@ describe("applyPolygonToMask", () => {
         { x: 1, y: 4 },
       ],
       mode: "remove",
-      opacity: 1,
     });
 
     expect(next[2 + 2 * 5]).toBe(0);

@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type PointerEvent } from "react";
+import { useEffect, useRef, useState, type PointerEvent, type RefObject } from "react";
 import type { BrushState } from "../types/session";
 import { displayToWorking } from "../utils/coords";
 import {
@@ -13,7 +13,7 @@ type WorkingPoint = {
   y: number;
 };
 
-export type MaskTool = "brush" | "eraser" | "edge-add" | "edge-remove" | "polygon-add" | "polygon-remove";
+export type MaskTool = "hand" | "brush" | "eraser" | "sam-add" | "sam-remove" | "edge-add" | "edge-remove" | "polygon-add" | "polygon-remove";
 export type CanvasViewMode = "before" | "after";
 
 type EditorCanvasProps = {
@@ -29,9 +29,12 @@ type EditorCanvasProps = {
   viewMode: CanvasViewMode;
   showMaskOverlay: boolean;
   polygonPoints: WorkingPoint[];
+  panContainerRef: RefObject<HTMLElement | null>;
   onMaskCommit: (mask: Uint8ClampedArray) => void;
+  onPromptSelect: (point: WorkingPoint, mode: "add" | "remove") => void;
   onAreaFill: (point: WorkingPoint, mode: "add" | "remove") => void;
   onPolygonPoint: (point: WorkingPoint) => void;
+  onPolygonClose: () => void;
 };
 
 type DisplayCursor = WorkingPoint & {
@@ -76,9 +79,12 @@ export function EditorCanvas({
   viewMode,
   showMaskOverlay,
   polygonPoints,
+  panContainerRef,
   onMaskCommit,
+  onPromptSelect,
   onAreaFill,
   onPolygonPoint,
+  onPolygonClose,
 }: EditorCanvasProps) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const sourceCanvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -88,7 +94,26 @@ export function EditorCanvas({
   const draftMaskRef = useRef<Uint8ClampedArray | null>(null);
   const lastPointRef = useRef<WorkingPoint | null>(null);
   const isDrawingRef = useRef(false);
+  const panRef = useRef<{ pointerId: number; startX: number; startY: number; scrollLeft: number; scrollTop: number } | null>(null);
   const [cursor, setCursor] = useState<DisplayCursor | null>(null);
+  const [isPanning, setIsPanning] = useState(false);
+  const [isHoveringFirstVertex, setIsHoveringFirstVertex] = useState(false);
+  const isPolygonTool = activeTool === "polygon-add" || activeTool === "polygon-remove";
+  const canClosePolygon = isPolygonTool && polygonPoints.length >= 3;
+
+  const toDisplayPoint = (point: WorkingPoint) => ({
+    x: (point.x / workingWidth) * displayWidth,
+    y: (point.y / workingHeight) * displayHeight,
+  });
+
+  const isNearFirstVertex = (point: WorkingPoint) => {
+    if (!canClosePolygon || workingWidth <= 0 || workingHeight <= 0) return false;
+    const first = polygonPoints[0];
+    if (!first) return false;
+    const current = toDisplayPoint(point);
+    const start = toDisplayPoint(first);
+    return Math.hypot(current.x - start.x, current.y - start.y) <= 14;
+  };
 
   const displayBounds = (bounds: DirtyBounds) => {
     const x = Math.floor((bounds.minX / workingWidth) * displayWidth);
@@ -245,8 +270,29 @@ export function EditorCanvas({
 
   const handlePointerDown = (event: PointerEvent<HTMLCanvasElement>) => {
     event.preventDefault();
+    if (activeTool === "hand") {
+      const panContainer = panContainerRef.current;
+      if (!panContainer) return;
+      event.currentTarget.setPointerCapture(event.pointerId);
+      panRef.current = {
+        pointerId: event.pointerId,
+        startX: event.clientX,
+        startY: event.clientY,
+        scrollLeft: panContainer.scrollLeft,
+        scrollTop: panContainer.scrollTop,
+      };
+      setCursor(null);
+      setIsPanning(true);
+      return;
+    }
+
     const point = pointFromEvent(event);
     setCursorFromPoint(point);
+
+    if (activeTool === "sam-add" || activeTool === "sam-remove") {
+      onPromptSelect(point, activeTool === "sam-add" ? "add" : "remove");
+      return;
+    }
 
     if (activeTool === "edge-add" || activeTool === "edge-remove") {
       onAreaFill(point, activeTool === "edge-add" ? "add" : "remove");
@@ -254,6 +300,10 @@ export function EditorCanvas({
     }
 
     if (activeTool === "polygon-add" || activeTool === "polygon-remove") {
+      if (isNearFirstVertex(point)) {
+        onPolygonClose();
+        return;
+      }
       onPolygonPoint(point);
       return;
     }
@@ -280,8 +330,19 @@ export function EditorCanvas({
   };
 
   const handlePointerMove = (event: PointerEvent<HTMLCanvasElement>) => {
+    if (activeTool === "hand") {
+      const pan = panRef.current;
+      const panContainer = panContainerRef.current;
+      if (pan && panContainer) {
+        panContainer.scrollLeft = pan.scrollLeft - (event.clientX - pan.startX);
+        panContainer.scrollTop = pan.scrollTop - (event.clientY - pan.startY);
+      }
+      return;
+    }
+
     const point = pointFromEvent(event);
     setCursorFromPoint(point);
+    setIsHoveringFirstVertex(isNearFirstVertex(point));
     if (!isDrawingRef.current || !draftMaskRef.current || !lastPointRef.current) return;
 
     const dirty = applyMaskStrokeInPlace(
@@ -305,14 +366,29 @@ export function EditorCanvas({
     }
     isDrawingRef.current = false;
     lastPointRef.current = null;
+    panRef.current = null;
+    setIsPanning(false);
     if (draftMaskRef.current) {
       onMaskCommit(new Uint8ClampedArray(draftMaskRef.current));
       draftMaskRef.current = null;
     }
   };
 
+  const firstVertex = polygonPoints[0] ? toDisplayPoint(polygonPoints[0]) : null;
+  const showBrushCursor = cursor && (activeTool === "brush" || activeTool === "eraser");
+  const showPromptCursor = cursor && (activeTool === "sam-add" || activeTool === "sam-remove");
+  const canvasCursor = isPanning
+    ? "grabbing"
+    : activeTool === "hand"
+      ? "grab"
+      : isHoveringFirstVertex
+        ? "copy"
+        : isPolygonTool
+          ? "crosshair"
+          : undefined;
+
   return (
-    <div className="relative max-h-full max-w-full overflow-hidden rounded-xl shadow-sm ring-1 ring-slate-200" style={{ width: displayWidth || undefined, height: displayHeight || undefined }}>
+    <div className="relative shrink-0 overflow-hidden rounded-xl shadow-sm ring-1 ring-slate-200" style={{ width: displayWidth || undefined, height: displayHeight || undefined }}>
       <canvas
         ref={canvasRef}
         aria-label="Uploaded room photo canvas"
@@ -321,11 +397,13 @@ export function EditorCanvas({
         onPointerMove={handlePointerMove}
         onPointerUp={handlePointerUp}
         onPointerCancel={handlePointerUp}
+        style={{ cursor: canvasCursor }}
         onPointerLeave={() => {
           if (!isDrawingRef.current) setCursor(null);
+          setIsHoveringFirstVertex(false);
         }}
       />
-      {cursor ? (
+      {showBrushCursor ? (
         <div
           aria-hidden="true"
           className={`pointer-events-none absolute rounded-full border-2 ${brush.mode === "erase" ? "border-red-600 bg-red-600/10" : "border-blue-600 bg-blue-600/10"}`}
@@ -336,6 +414,18 @@ export function EditorCanvas({
             height: cursor.radius * 2,
           }}
         />
+      ) : null}
+      {showPromptCursor ? (
+        <div
+          aria-hidden="true"
+          className="pointer-events-none absolute flex h-4 w-4 items-center justify-center rounded-full border border-slate-700 bg-white text-[10px] font-bold leading-none text-slate-700 shadow-sm"
+          style={{
+            left: cursor.x + 8,
+            top: cursor.y + 8,
+          }}
+        >
+          {activeTool === "sam-remove" ? "-" : "+"}
+        </div>
       ) : null}
       {polygonPoints.length > 0 ? (
         <svg
@@ -352,18 +442,44 @@ export function EditorCanvas({
             strokeDasharray="6 4"
             strokeWidth="2"
           />
-          {polygonPoints.map((point, index) => (
-            <circle
-              key={`${point.x}-${point.y}-${index}`}
-              cx={(point.x / workingWidth) * displayWidth}
-              cy={(point.y / workingHeight) * displayHeight}
-              r="4"
-              fill={activeTool === "polygon-remove" ? "#dc2626" : "#2563eb"}
-              stroke="white"
-              strokeWidth="2"
-            />
-          ))}
+          {polygonPoints.map((point, index) => {
+            const displayPoint = toDisplayPoint(point);
+            const isFirstVertex = index === 0 && canClosePolygon;
+            const color = activeTool === "polygon-remove" ? "#dc2626" : "#2563eb";
+            return (
+              <g key={`${point.x}-${point.y}-${index}`}>
+                {isFirstVertex ? (
+                  <circle
+                    className="animate-ping"
+                    cx={displayPoint.x}
+                    cy={displayPoint.y}
+                    r="9"
+                    fill="none"
+                    stroke={color}
+                    strokeWidth="3"
+                    opacity="0.65"
+                  />
+                ) : null}
+                <circle
+                  cx={displayPoint.x}
+                  cy={displayPoint.y}
+                  r={isFirstVertex ? "6" : "4"}
+                  fill={color}
+                  stroke="white"
+                  strokeWidth="2"
+                />
+              </g>
+            );
+          })}
         </svg>
+      ) : null}
+      {canClosePolygon && firstVertex ? (
+        <div
+          className="pointer-events-none absolute z-10 rounded-lg border border-slate-200 bg-white/95 px-3 py-2 text-xs font-semibold text-slate-700 shadow-lg"
+          style={{ left: Math.min(firstVertex.x + 12, Math.max(12, displayWidth - 190)), top: Math.max(12, firstVertex.y - 42) }}
+        >
+          Click the glowing first point to finish.
+        </div>
       ) : null}
     </div>
   );

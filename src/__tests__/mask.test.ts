@@ -22,22 +22,21 @@ describe("mask buffers", () => {
     expect(hasMaskCoverage(mask)).toBe(true);
   });
 
-  it("paints a circular brush with opacity", () => {
+  it("paints a circular brush as full coverage", () => {
     const mask = createMaskBuffer(7, 7);
     const next = applyMaskBrush(mask, 7, 7, {
       x: 3,
       y: 3,
       sizePx: 3,
-      opacity: 0.5,
       mode: "paint",
     });
 
     expect(mask[3 * 7 + 3]).toBe(0);
-    expect(next[3 * 7 + 3]).toBe(128);
+    expect(next[3 * 7 + 3]).toBe(255);
     expect(next[0]).toBe(0);
   });
 
-  it("does not reduce stronger existing paint with a weaker paint stroke", () => {
+  it("keeps existing selected pixels selected", () => {
     const mask = createMaskBuffer(3, 3);
     mask[4] = 255;
 
@@ -45,14 +44,13 @@ describe("mask buffers", () => {
       x: 1,
       y: 1,
       sizePx: 1,
-      opacity: 0.25,
       mode: "paint",
     });
 
     expect(next[4]).toBe(255);
   });
 
-  it("erases by opacity without underflow", () => {
+  it("erases selected pixels fully", () => {
     const mask = createMaskBuffer(3, 3);
     mask[4] = 100;
 
@@ -60,7 +58,6 @@ describe("mask buffers", () => {
       x: 1,
       y: 1,
       sizePx: 1,
-      opacity: 0.5,
       mode: "erase",
     });
 
@@ -73,7 +70,6 @@ describe("mask buffers", () => {
       x: 0,
       y: 0,
       sizePx: 5,
-      opacity: 1,
       mode: "paint",
     });
 
@@ -92,7 +88,6 @@ describe("mask buffers", () => {
       x: 1,
       y: 1,
       sizePx: 1,
-      opacity: 1,
       mode: "paint",
     });
 
@@ -107,7 +102,6 @@ describe("mask buffers", () => {
       x: 0,
       y: 0,
       sizePx: 5,
-      opacity: 1,
       mode: "paint",
     });
 
@@ -125,7 +119,7 @@ describe("mask buffers", () => {
       5,
       { x: 1, y },
       { x: 13, y },
-      { sizePx: 3, opacity: 1, mode: "paint" }
+      { sizePx: 3, mode: "paint" }
     );
 
     for (let x = 1; x <= 13; x += 1) {

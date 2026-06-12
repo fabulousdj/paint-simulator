@@ -1,4 +1,4 @@
-import { PaintBucket, ShieldCheck, SlidersHorizontal, X } from "lucide-react";
+import { Brush, Eraser, Eye, EyeOff, Hand, Minus, PaintBucket, Pentagon, Plus, Redo2, RotateCcw, ShieldCheck, SlidersHorizontal, Undo2, X } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ComparisonPreview, type PreviewMode } from "./components/ComparisonPreview";
 import { EditorCanvas, type CanvasViewMode, type MaskTool } from "./components/EditorCanvas";
@@ -11,9 +11,14 @@ import { composeExportImage, createExportFilename } from "./utils/export";
 import { resetMaskBuffer } from "./utils/mask";
 import { emptyMaskHistory, pushMaskHistory, redoMaskHistory, undoMaskHistory, type MaskHistory } from "./utils/maskHistory";
 import { applyPolygonToMask, edgeAwareAreaFill, type MaskApplyMode, type SmartMaskPoint } from "./utils/smartMask";
+import { mergePromptMask, removePromptMask, selectWallMaskFromPoint } from "./utils/wallSegmentation";
 import { getWorkflowReadiness } from "./utils/workflow";
 
 type GuidedStep = "photo" | "wall" | "colors" | "preview";
+type WallSelectionStatus = "idle" | "running" | "complete" | "error";
+const WALL_IMAGE_ZOOM_MIN = 0.75;
+const WALL_IMAGE_ZOOM_MAX = 2.5;
+const WALL_IMAGE_ZOOM_STEP = 0.25;
 
 const guidedSteps: Array<{ id: GuidedStep; label: string; description: string }> = [
   { id: "photo", label: "Photo", description: "Upload room" },
@@ -46,13 +51,16 @@ function App() {
   const [isPaintDrawerOpen, setIsPaintDrawerOpen] = useState(false);
   const [previewMode, setPreviewMode] = useState<PreviewMode>("split");
   const [showMaskOverlay, setShowMaskOverlay] = useState(true);
-  const [activeTool, setActiveTool] = useState<MaskTool>("edge-add");
+  const [activeTool, setActiveTool] = useState<MaskTool>("sam-add");
   const [fillTolerance, setFillTolerance] = useState(34);
   const [polygonPoints, setPolygonPoints] = useState<SmartMaskPoint[]>([]);
+  const [wallImageZoom, setWallImageZoom] = useState(1);
   const [maskHistory, setMaskHistory] = useState<MaskHistory>(emptyMaskHistory);
   const [viewMode, setViewMode] = useState<CanvasViewMode>("after");
   const [latestPreviewSignature, setLatestPreviewSignature] = useState<string | null>(null);
   const [maskRevision, setMaskRevision] = useState(0);
+  const [wallSelectionStatus, setWallSelectionStatus] = useState<WallSelectionStatus>("idle");
+  const [wallSelectionMessage, setWallSelectionMessage] = useState("Click inside the wall to generate a local AI mask.");
   const [isPreviewStartPending, setIsPreviewStartPending] = useState(false);
   const [previewRunKey, setPreviewRunKey] = useState(0);
   const [completedRunKey, setCompletedRunKey] = useState(0);
@@ -136,6 +144,10 @@ function App() {
     setGuidedStep("photo");
     setLatestPreviewSignature(null);
     setMaskRevision(0);
+    setActiveTool("sam-add");
+    setWallSelectionStatus("idle");
+    setWallSelectionMessage("Click inside the wall to generate a local AI mask.");
+    setWallImageZoom(1);
     setPreviewRunKey(0);
     setCompletedRunKey(0);
     setViewMode("before");
@@ -222,17 +234,49 @@ function App() {
         mode,
         colorTolerance: fillTolerance,
         edgeThreshold: 42,
-        opacity: state.session.brush.opacity,
       }));
     },
-    [commitMaskChange, currentMask, fillTolerance, state.session.brush.opacity, state.session.image]
+    [commitMaskChange, currentMask, fillTolerance, state.session.image]
+  );
+
+  const promptSelectWall = useCallback(
+    async (point: SmartMaskPoint, mode: MaskApplyMode) => {
+      const { sourceImageData, workingWidth, workingHeight } = state.session.image;
+      if (!sourceImageData || workingWidth <= 0 || workingHeight <= 0 || wallSelectionStatus === "running") return;
+
+      setWallSelectionStatus("running");
+      setWallSelectionMessage("Loading local wall selection model and generating a mask...");
+      try {
+        const promptMask = await selectWallMaskFromPoint({ sourceImageData, point });
+        commitMaskChange(
+          mode === "add"
+            ? mergePromptMask(currentMask(), promptMask)
+            : removePromptMask(currentMask(), promptMask)
+        );
+        setWallSelectionStatus("complete");
+        setWallSelectionMessage(mode === "add" ? "AI wall mask added. Refine with brush, eraser, or polygon if needed." : "AI-selected area removed from the wall mask.");
+      } catch {
+        const fallbackMask = edgeAwareAreaFill({
+          sourceImageData,
+          mask: currentMask(),
+          seed: point,
+          mode,
+          colorTolerance: fillTolerance,
+          edgeThreshold: 42,
+        });
+        commitMaskChange(fallbackMask);
+        setWallSelectionStatus("error");
+        setWallSelectionMessage("AI wall selection was unavailable, so ChromaMatch used similar-area selection instead.");
+      }
+    },
+    [commitMaskChange, currentMask, fillTolerance, state.session.image, wallSelectionStatus]
   );
 
   const addPolygonPoint = useCallback((point: SmartMaskPoint) => {
     setPolygonPoints((points) => [...points, point]);
   }, []);
 
-  const applyPolygon = useCallback(() => {
+  const closePolygon = useCallback(() => {
     const { workingWidth, workingHeight } = state.session.image;
     if (polygonPoints.length < 3 || workingWidth <= 0 || workingHeight <= 0) return;
 
@@ -242,10 +286,16 @@ function App() {
       height: workingHeight,
       points: polygonPoints,
       mode: activeTool === "polygon-remove" ? "remove" : "add",
-      opacity: state.session.brush.opacity,
     }));
     setPolygonPoints([]);
-  }, [activeTool, commitMaskChange, currentMask, polygonPoints, state.session.brush.opacity, state.session.image]);
+  }, [activeTool, commitMaskChange, currentMask, polygonPoints, state.session.image]);
+
+  const zoomWallImage = useCallback((direction: "in" | "out") => {
+    setWallImageZoom((zoom) => {
+      const delta = direction === "in" ? WALL_IMAGE_ZOOM_STEP : -WALL_IMAGE_ZOOM_STEP;
+      return Math.min(WALL_IMAGE_ZOOM_MAX, Math.max(WALL_IMAGE_ZOOM_MIN, Number((zoom + delta).toFixed(2))));
+    });
+  }, []);
 
   const beginPreviewRender = useCallback(() => {
     if (!readiness.canSimulate) return;
@@ -351,6 +401,10 @@ function App() {
       );
     }
 
+    const canvasZoom = guidedStep === "wall" || isWallEditMode ? wallImageZoom : 1;
+    const canvasDisplayWidth = Math.round(state.session.image.displayWidth * canvasZoom);
+    const canvasDisplayHeight = Math.round(state.session.image.displayHeight * canvasZoom);
+
     return (
       <EditorCanvas
         sourceImageData={state.session.image.sourceImageData}
@@ -358,16 +412,19 @@ function App() {
         mask={state.session.maskImageData}
         workingWidth={state.session.image.workingWidth}
         workingHeight={state.session.image.workingHeight}
-        displayWidth={state.session.image.displayWidth}
-        displayHeight={state.session.image.displayHeight}
+        displayWidth={canvasDisplayWidth}
+        displayHeight={canvasDisplayHeight}
         brush={state.session.brush}
         activeTool={activeTool}
         viewMode={displayViewMode}
         showMaskOverlay={showMaskOverlay && (isWallEditMode || !firstPreviewComplete || simulation.status === "running")}
         polygonPoints={polygonPoints}
+        panContainerRef={workspaceRef}
         onMaskCommit={commitMaskChange}
+        onPromptSelect={promptSelectWall}
         onAreaFill={fillArea}
         onPolygonPoint={addPolygonPoint}
+        onPolygonClose={closePolygon}
       />
     );
   };
@@ -410,28 +467,23 @@ function App() {
 
   const renderMaskTools = () => (
     <MaskToolsPanel
-      actionButtonClass={actionButtonClass}
-      activeTool={activeTool}
-      applyPolygon={applyPolygon}
       canUpdate={readiness.canSimulate && previewNeedsUpdate && !previewIsRendering}
       fillTolerance={fillTolerance}
       maskHistory={maskHistory}
       onClose={firstPreviewComplete ? () => setIsWallEditMode(false) : undefined}
       onUpdate={firstPreviewComplete ? beginPreviewRender : undefined}
-      polygonPoints={polygonPoints}
       resetMask={resetMask}
-      resetPolygon={() => setPolygonPoints([])}
       redoMask={redoMask}
       selectTool={selectTool}
+      wallSelectionMessage={wallSelectionMessage}
+      wallSelectionStatus={wallSelectionStatus}
       setFillTolerance={setFillTolerance}
       setShowMaskOverlay={setShowMaskOverlay}
       showMaskOverlay={showMaskOverlay}
       toolButtonClass={toolButtonClass}
       undoMask={undoMask}
       brushSize={state.session.brush.sizePx}
-      brushOpacity={state.session.brush.opacity}
       setBrushSize={(size) => dispatch({ type: "SET_BRUSH_SIZE", size })}
-      setBrushOpacity={(opacity) => dispatch({ type: "SET_BRUSH_OPACITY", opacity })}
     />
   );
 
@@ -641,7 +693,7 @@ function App() {
             {firstPreviewComplete ? (
               <>
                 <button type="button" className={actionButtonClass} onClick={() => { setIsPaintDrawerOpen((open) => !open); setIsWallEditMode(false); }}>Paints</button>
-                <button type="button" className={actionButtonClass} onClick={() => { setIsWallEditMode((open) => !open); setIsPaintDrawerOpen(false); setShowMaskOverlay(true); }}>Edit wall</button>
+                <button type="button" className={actionButtonClass} onClick={() => { setIsWallEditMode((open) => !open); setIsPaintDrawerOpen(false); setShowMaskOverlay(true); setActiveTool("sam-add"); }}>Edit wall</button>
                 <button type="button" className={actionButtonClass} disabled={!canDownload} onClick={downloadResult}>Download PNG</button>
                 <button type="button" className={actionButtonClass} onClick={clearImage}>New photo</button>
               </>
@@ -655,9 +707,29 @@ function App() {
 
       <main className="flex min-h-0 flex-1 flex-col overflow-hidden">
         <div className="flex min-h-0 flex-1 overflow-hidden">
-          <section ref={workspaceRef} className="relative flex min-h-0 flex-1 items-center justify-center overflow-hidden bg-slate-100 p-4 md:p-6">
-            {firstPreviewComplete ? renderActiveEditor() : renderGuidedPrimary()}
-            {previewIsRendering && !firstPreviewComplete ? <RenderingOverlay /> : null}
+          <section className="relative flex min-h-0 flex-1 overflow-hidden bg-slate-100">
+            <div
+              ref={workspaceRef}
+              className={cx(
+                "relative flex min-h-0 flex-1 overflow-auto p-4 md:p-6",
+                (guidedStep === "wall" || isWallEditMode) && wallImageZoom > 1 ? "items-start justify-start" : "items-center justify-center"
+              )}
+            >
+              {firstPreviewComplete ? renderActiveEditor() : renderGuidedPrimary()}
+              {previewIsRendering && !firstPreviewComplete ? <RenderingOverlay /> : null}
+              {wallSelectionStatus === "running" ? <WallSelectionOverlay /> : null}
+            </div>
+            {guidedStep === "wall" || isWallEditMode ? (
+              <div className="absolute bottom-5 right-5 z-30">
+                <ImageZoomControls
+                  zoom={wallImageZoom}
+                  canZoomOut={wallImageZoom > WALL_IMAGE_ZOOM_MIN}
+                  canZoomIn={wallImageZoom < WALL_IMAGE_ZOOM_MAX}
+                  onZoomOut={() => zoomWallImage("out")}
+                  onZoomIn={() => zoomWallImage("in")}
+                />
+              </div>
+            ) : null}
           </section>
           {!firstPreviewComplete ? renderGuidedAside() : null}
         </div>
@@ -751,6 +823,56 @@ function RenderingOverlay() {
         <p className="mt-3 text-sm font-semibold text-slate-900">Rendering new paint locally...</p>
         <p className="mt-1 text-xs text-slate-500">Using the current wall mask and paint values.</p>
       </div>
+    </div>
+  );
+}
+
+function WallSelectionOverlay() {
+  return (
+    <div className="pointer-events-none absolute inset-0 z-10 flex items-center justify-center bg-slate-950/10 backdrop-blur-[1px]">
+      <div className="rounded-2xl border border-teal-100 bg-white/95 px-6 py-5 text-center shadow-xl">
+        <div className="mx-auto h-8 w-8 animate-spin rounded-full border-4 border-teal-100 border-t-teal-700" aria-hidden="true" />
+        <p className="mt-3 text-sm font-semibold text-slate-900">Selecting wall locally...</p>
+        <p className="mt-1 text-xs text-slate-500">You can keep using the app while the model finishes.</p>
+      </div>
+    </div>
+  );
+}
+
+function ImageZoomControls({
+  zoom,
+  canZoomOut,
+  canZoomIn,
+  onZoomOut,
+  onZoomIn,
+}: {
+  zoom: number;
+  canZoomOut: boolean;
+  canZoomIn: boolean;
+  onZoomOut: () => void;
+  onZoomIn: () => void;
+}) {
+  return (
+    <div className="flex items-center gap-1 rounded-xl border border-slate-200 bg-white/95 p-1 shadow-lg backdrop-blur" aria-label="Image zoom controls">
+      <button
+        type="button"
+        className="flex min-h-10 min-w-10 items-center justify-center rounded-lg text-slate-700 transition-colors hover:bg-slate-100 disabled:cursor-not-allowed disabled:text-slate-300 focus:outline-none focus:ring-2 focus:ring-teal-200 cursor-pointer"
+        disabled={!canZoomOut}
+        onClick={onZoomOut}
+        aria-label="Zoom image out"
+      >
+        <Minus className="h-4 w-4" />
+      </button>
+      <span className="min-w-12 text-center text-xs font-semibold text-slate-600">{Math.round(zoom * 100)}%</span>
+      <button
+        type="button"
+        className="flex min-h-10 min-w-10 items-center justify-center rounded-lg text-slate-700 transition-colors hover:bg-slate-100 disabled:cursor-not-allowed disabled:text-slate-300 focus:outline-none focus:ring-2 focus:ring-teal-200 cursor-pointer"
+        disabled={!canZoomIn}
+        onClick={onZoomIn}
+        aria-label="Zoom image in"
+      >
+        <Plus className="h-4 w-4" />
+      </button>
     </div>
   );
 }
@@ -965,52 +1087,46 @@ function AdvancedDiagnostics({
 }
 
 function MaskToolsPanel({
-  actionButtonClass,
-  activeTool,
-  applyPolygon,
   canUpdate,
   fillTolerance,
   maskHistory,
   onClose,
   onUpdate,
-  polygonPoints,
   resetMask,
-  resetPolygon,
   redoMask,
   selectTool,
+  wallSelectionMessage,
+  wallSelectionStatus,
   setFillTolerance,
   setShowMaskOverlay,
   showMaskOverlay,
   toolButtonClass,
   undoMask,
   brushSize,
-  brushOpacity,
   setBrushSize,
-  setBrushOpacity,
 }: {
-  actionButtonClass: string;
-  activeTool: MaskTool;
-  applyPolygon: () => void;
   canUpdate?: boolean;
   fillTolerance: number;
   maskHistory: MaskHistory;
   onClose?: () => void;
   onUpdate?: () => void;
-  polygonPoints: SmartMaskPoint[];
   resetMask: () => void;
-  resetPolygon: () => void;
   redoMask: () => void;
   selectTool: (tool: MaskTool) => void;
+  wallSelectionMessage: string;
+  wallSelectionStatus: WallSelectionStatus;
   setFillTolerance: (value: number) => void;
   setShowMaskOverlay: (update: (visible: boolean) => boolean) => void;
   showMaskOverlay: boolean;
   toolButtonClass: (tool: MaskTool) => string;
   undoMask: () => void;
   brushSize: number;
-  brushOpacity: number;
   setBrushSize: (size: number) => void;
-  setBrushOpacity: (opacity: number) => void;
 }) {
+  const iconActionButtonClass = "flex min-h-11 min-w-11 items-center justify-center rounded-md border border-slate-200 text-slate-700 transition-colors hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50 focus:outline-none focus:ring-2 focus:ring-teal-200 cursor-pointer";
+  const manualToolContentClass = "grid w-full grid-cols-[1.25rem_1fr] items-center gap-2 text-left";
+  const manualToolIconSlotClass = "relative inline-flex h-5 w-5 items-center justify-center";
+
   return (
     <aside className={cx(
       "flex w-full flex-col border-l border-slate-200 bg-white",
@@ -1030,21 +1146,77 @@ function MaskToolsPanel({
           </div>
         ) : null}
         <section className="rounded-xl border border-teal-100 bg-teal-50 p-4 text-sm text-teal-900">
-          <h2 className="font-semibold">Smart select</h2>
-          <p className="mt-1">Click inside the wall first. Use refinement tools only if the selection needs correction.</p>
-          <button type="button" className={cx("mt-3 w-full", toolButtonClass("edge-add"))} onClick={() => selectTool("edge-add")}>Smart select wall</button>
+          <h2 className="font-semibold">Click wall to select</h2>
+          <p className="mt-1">Use local AI selection first. Use refinement tools only if the wall boundary needs correction.</p>
+          <button type="button" className={cx("mt-3 w-full", toolButtonClass("sam-add"))} disabled={wallSelectionStatus === "running"} onClick={() => selectTool("sam-add")}>
+            {wallSelectionStatus === "running" ? "Selecting wall..." : "AI wall select"}
+          </button>
+          <button type="button" className={cx("mt-2 w-full", toolButtonClass("sam-remove"))} disabled={wallSelectionStatus === "running"} onClick={() => selectTool("sam-remove")}>
+            AI wall remove
+          </button>
+          <p className={cx("mt-3 rounded-lg p-3 text-xs", wallSelectionStatus === "error" ? "bg-amber-50 text-amber-800" : "bg-white/70 text-teal-900")}>{wallSelectionMessage}</p>
         </section>
 
         <section className="mt-4 rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
           <div className="flex items-center gap-2 text-sm font-semibold text-slate-900">
             <SlidersHorizontal className="h-4 w-4 text-slate-500" />
-            Refine mask
+            Manual tools
           </div>
           <div className="mt-3 grid grid-cols-2 gap-2">
-            <button type="button" className={toolButtonClass("brush")} onClick={() => selectTool("brush")}>Brush</button>
-            <button type="button" className={toolButtonClass("eraser")} onClick={() => selectTool("eraser")}>Eraser</button>
-            <button type="button" className={toolButtonClass("polygon-add")} onClick={() => selectTool("polygon-add")}>Poly add</button>
-            <button type="button" className={toolButtonClass("polygon-remove")} onClick={() => selectTool("polygon-remove")}>Poly remove</button>
+            <button type="button" className={toolButtonClass("brush")} onClick={() => selectTool("brush")} aria-label="Brush mask">
+              <span className={manualToolContentClass}>
+                <span className={manualToolIconSlotClass}><Brush className="h-3.5 w-3.5" /></span>
+                Brush
+              </span>
+            </button>
+            <button type="button" className={toolButtonClass("eraser")} onClick={() => selectTool("eraser")} aria-label="Erase mask">
+              <span className={manualToolContentClass}>
+                <span className={manualToolIconSlotClass}><Eraser className="h-3.5 w-3.5" /></span>
+                Eraser
+              </span>
+            </button>
+            <button type="button" className={toolButtonClass("edge-add")} onClick={() => selectTool("edge-add")} aria-label="Add similar area">
+              <span className={manualToolContentClass}>
+                <span className={manualToolIconSlotClass}>
+                  <PaintBucket className="h-3.5 w-3.5" />
+                  <Plus className="absolute -right-0.5 -top-0.5 h-2.5 w-2.5 rounded-full bg-white" />
+                </span>
+                Add similar
+              </span>
+            </button>
+            <button type="button" className={toolButtonClass("edge-remove")} onClick={() => selectTool("edge-remove")} aria-label="Remove similar area">
+              <span className={manualToolContentClass}>
+                <span className={manualToolIconSlotClass}>
+                  <PaintBucket className="h-3.5 w-3.5" />
+                  <Minus className="absolute -right-0.5 -top-0.5 h-2.5 w-2.5 rounded-full bg-white" />
+                </span>
+                Remove similar
+              </span>
+            </button>
+            <button type="button" className={toolButtonClass("polygon-add")} onClick={() => selectTool("polygon-add")} aria-label="Define area">
+              <span className={manualToolContentClass}>
+                <span className={manualToolIconSlotClass}>
+                  <Pentagon className="h-3.5 w-3.5" />
+                  <Plus className="absolute -right-0.5 -top-0.5 h-2.5 w-2.5 rounded-full bg-white" />
+                </span>
+                Define area
+              </span>
+            </button>
+            <button type="button" className={toolButtonClass("polygon-remove")} onClick={() => selectTool("polygon-remove")} aria-label="Remove area">
+              <span className={manualToolContentClass}>
+                <span className={manualToolIconSlotClass}>
+                  <Pentagon className="h-3.5 w-3.5" />
+                  <Minus className="absolute -right-0.5 -top-0.5 h-2.5 w-2.5 rounded-full bg-white" />
+                </span>
+                Remove area
+              </span>
+            </button>
+            <button type="button" className={toolButtonClass("hand")} onClick={() => selectTool("hand")} aria-label="Pan image">
+              <span className={manualToolContentClass}>
+                <span className={manualToolIconSlotClass}><Hand className="h-3.5 w-3.5" /></span>
+                Hand
+              </span>
+            </button>
           </div>
           <div className="mt-4 space-y-3">
             <label className="block text-xs font-semibold text-slate-700">
@@ -1052,29 +1224,24 @@ function MaskToolsPanel({
               <input className="mt-1 w-full" type="range" min="4" max="128" value={brushSize} onChange={(event) => setBrushSize(Number(event.target.value))} />
             </label>
             <label className="block text-xs font-semibold text-slate-700">
-              Opacity: {Math.round(brushOpacity * 100)}%
-              <input className="mt-1 w-full" type="range" min="0.1" max="1" step="0.1" value={brushOpacity} onChange={(event) => setBrushOpacity(Number(event.target.value))} />
-            </label>
-            <label className="block text-xs font-semibold text-slate-700">
               Edge tolerance: {fillTolerance}
               <input className="mt-1 w-full" type="range" min="8" max="96" value={fillTolerance} onChange={(event) => setFillTolerance(Number(event.target.value))} />
             </label>
           </div>
-          <div className="mt-4 grid grid-cols-2 gap-2">
-            <button type="button" className={actionButtonClass} disabled={maskHistory.past.length === 0} onClick={undoMask}>Undo</button>
-            <button type="button" className={actionButtonClass} disabled={maskHistory.future.length === 0} onClick={redoMask}>Redo</button>
-            <button type="button" className={actionButtonClass} onClick={() => setShowMaskOverlay((visible) => !visible)}>{showMaskOverlay ? "Hide overlay" : "Show overlay"}</button>
-            <button type="button" className={actionButtonClass} onClick={resetMask}>Reset mask</button>
-            <button type="button" className={actionButtonClass} disabled={polygonPoints.length < 3} onClick={applyPolygon}>Apply polygon</button>
-            <button type="button" className={actionButtonClass} disabled={polygonPoints.length === 0} onClick={resetPolygon}>Reset polygon</button>
+          <div className="mt-4 grid grid-cols-4 gap-2">
+            <button type="button" className={iconActionButtonClass} disabled={maskHistory.past.length === 0} onClick={undoMask} aria-label="Undo mask change">
+              <Undo2 className="h-4 w-4" />
+            </button>
+            <button type="button" className={iconActionButtonClass} disabled={maskHistory.future.length === 0} onClick={redoMask} aria-label="Redo mask change">
+              <Redo2 className="h-4 w-4" />
+            </button>
+            <button type="button" className={iconActionButtonClass} onClick={() => setShowMaskOverlay((visible) => !visible)} aria-label={showMaskOverlay ? "Hide mask overlay" : "Show mask overlay"}>
+              {showMaskOverlay ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+            </button>
+            <button type="button" className={iconActionButtonClass} onClick={resetMask} aria-label="Reset wall mask">
+              <RotateCcw className="h-4 w-4" />
+            </button>
           </div>
-          <p className="mt-4 text-xs text-slate-500">
-            {activeTool.startsWith("edge")
-              ? "Click once inside a wall-like area to fill or remove the detected region."
-              : activeTool.startsWith("polygon")
-                ? `Pinned vertices: ${polygonPoints.length}. Click the image to add points, then apply.`
-                : "Drag on the image to paint or erase the mask manually."}
-          </p>
         </section>
       </div>
       {onUpdate ? (
