@@ -61,8 +61,8 @@ describe("createWorkingImage", () => {
   it("bounds working image data at 2048px on the longest side", () => {
     const imageData = {
       width: 2048,
-      height: 1024,
-      data: new Uint8ClampedArray(2048 * 1024 * 4),
+      height: 1536,
+      data: new Uint8ClampedArray(2048 * 1536 * 4),
       colorSpace: "srgb",
     } as ImageData;
     const drawImage = vi.fn();
@@ -74,16 +74,16 @@ describe("createWorkingImage", () => {
     } as unknown as CanvasRenderingContext2D);
 
     const img = {
-      naturalWidth: 4096,
-      naturalHeight: 2048,
+      naturalWidth: 5712,
+      naturalHeight: 4284,
     } as HTMLImageElement;
 
     const working = createWorkingImage(img);
 
     expect(working.width).toBe(2048);
-    expect(working.height).toBe(1024);
+    expect(working.height).toBe(1536);
     expect(working.imageData).toBe(imageData);
-    expect(drawImage).toHaveBeenCalledWith(img, 0, 0, 2048, 1024);
-    expect(getImageData).toHaveBeenCalledWith(0, 0, 2048, 1024);
+    expect(drawImage).toHaveBeenCalledWith(img, 0, 0, 2048, 1536);
+    expect(getImageData).toHaveBeenCalledWith(0, 0, 2048, 1536);
   });
 });

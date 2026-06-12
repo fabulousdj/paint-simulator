@@ -8,8 +8,8 @@ import {
 
 describe("workingDimensions", () => {
   it("caps the longest side at 2048 by default", () => {
-    expect(workingDimensions(4096, 2048)).toEqual({ w: 2048, h: 1024 });
-    expect(workingDimensions(1200, 3000)).toEqual({ w: 819, h: 2048 });
+    expect(workingDimensions(8192, 4096)).toEqual({ w: 2048, h: 1024 });
+    expect(workingDimensions(5712, 4284)).toEqual({ w: 2048, h: 1536 });
   });
 
   it("does not upscale small images", () => {

@@ -67,14 +67,15 @@ describe("session reducer", () => {
     expect(next.resultImageData).toBeNull();
   });
 
-  it("clears stale results when simulation inputs change", () => {
+  it("preserves rendered results when simulation inputs change", () => {
+    const result = new Uint8ClampedArray([1, 2, 3, 4]);
     const state = {
       ...defaultSession,
-      resultImageData: new Uint8ClampedArray([1, 2, 3, 4]),
+      resultImageData: result,
     };
 
-    expect(sessionReducer(state, { type: "SET_MASK_BUFFER", buffer: createMaskBuffer(1, 1) }).resultImageData).toBeNull();
-    expect(sessionReducer(state, { type: "SET_SIMULATION_MODE", mode: "rgb-ratio-debug" }).resultImageData).toBeNull();
+    expect(sessionReducer(state, { type: "SET_MASK_BUFFER", buffer: createMaskBuffer(1, 1) }).resultImageData).toBe(result);
+    expect(sessionReducer(state, { type: "SET_SIMULATION_MODE", mode: "rgb-ratio-debug" }).resultImageData).toBe(result);
   });
 
   it("SET_BRUSH updates nested brush state", () => {

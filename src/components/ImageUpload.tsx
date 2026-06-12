@@ -1,6 +1,7 @@
 import { useCallback, useRef, useState } from "react";
 import { Upload, X } from "lucide-react";
 import { IMAGE_UPLOAD_ACCEPT, UNSUPPORTED_IMAGE_TYPE_MESSAGE, isAcceptedImageFile } from "../hooks/useEditorSession";
+import { WORKING_MAX } from "../utils/coords";
 
 interface ImageUploadProps {
   onFile: (file: File) => void | Promise<void>;
@@ -47,7 +48,7 @@ export const ImageUpload = ({ onFile, hasImage, onClear, fileName, isLoading = f
         <div className="flex items-center justify-between gap-2">
           <div className="min-w-0">
             <span className="block truncate text-sm font-medium text-gray-700">{fileName ?? "Image loaded"}</span>
-            <span className="text-xs text-gray-500">Photo loaded. Working image prepared at up to 2048px on the longest side.</span>
+            <span className="text-xs text-gray-500">Photo loaded. Working image prepared at up to {WORKING_MAX}px on the longest side.</span>
           </div>
           <button
             type="button"
