@@ -312,11 +312,11 @@ export function EditorCanvas({
   };
 
   return (
-    <div className="relative max-h-full max-w-full" style={{ width: displayWidth || undefined, height: displayHeight || undefined }}>
+    <div className="relative max-h-full max-w-full overflow-hidden rounded-xl shadow-sm ring-1 ring-slate-200" style={{ width: displayWidth || undefined, height: displayHeight || undefined }}>
       <canvas
         ref={canvasRef}
         aria-label="Uploaded room photo canvas"
-        className="h-full w-full touch-none rounded-lg border border-gray-200 bg-white shadow-sm"
+        className="h-full w-full touch-none bg-white"
         onPointerDown={handlePointerDown}
         onPointerMove={handlePointerMove}
         onPointerUp={handlePointerUp}

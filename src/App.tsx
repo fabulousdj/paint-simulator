@@ -413,8 +413,11 @@ function App() {
       actionButtonClass={actionButtonClass}
       activeTool={activeTool}
       applyPolygon={applyPolygon}
+      canUpdate={readiness.canSimulate && previewNeedsUpdate && !previewIsRendering}
       fillTolerance={fillTolerance}
       maskHistory={maskHistory}
+      onClose={firstPreviewComplete ? () => setIsWallEditMode(false) : undefined}
+      onUpdate={firstPreviewComplete ? beginPreviewRender : undefined}
       polygonPoints={polygonPoints}
       resetMask={resetMask}
       resetPolygon={() => setPolygonPoints([])}
@@ -583,7 +586,7 @@ function App() {
         label={previewIsRendering ? "Updating locally" : previewNeedsUpdate ? "Preview needs update" : "Preview ready"}
         tone={previewIsRendering ? "blue" : previewNeedsUpdate ? "amber" : "green"}
       />
-      {previewIsRendering ? renderRenderingPreviewSurface() : hasImage && state.session.image.sourceImageData ? (
+      {previewIsRendering ? renderRenderingPreviewSurface() : isWallEditMode ? renderCanvas() : hasImage && state.session.image.sourceImageData ? (
         <ComparisonPreview
           sourceImageData={state.session.image.sourceImageData}
           resultImageData={previewIsRendering ? null : state.session.resultImageData}
@@ -616,16 +619,7 @@ function App() {
           workingWidth={state.session.image.workingWidth}
         />
       ) : null}
-    </>
-  );
-
-  const renderWallEditMode = () => (
-    <>
-      <div className="absolute left-4 top-4 z-10 rounded-xl border border-slate-200 bg-white/95 px-4 py-3 shadow-sm backdrop-blur">
-        <p className="text-xs font-semibold uppercase tracking-wide text-teal-700">Edit wall selection</p>
-        <p className="mt-1 text-sm text-slate-700">Use smart select first, then refine the mask.</p>
-      </div>
-      {renderCanvas()}
+      {isWallEditMode ? renderMaskTools() : null}
     </>
   );
 
@@ -646,19 +640,15 @@ function App() {
           <div className="ml-auto flex flex-wrap items-center gap-2">
             {firstPreviewComplete ? (
               <>
-                <button type="button" className={actionButtonClass} onClick={() => setIsPaintDrawerOpen(true)}>Paints</button>
-                <button type="button" className={actionButtonClass} onClick={() => { setIsWallEditMode(true); setIsPaintDrawerOpen(false); setShowMaskOverlay(true); }}>Edit wall</button>
-                {previewNeedsUpdate ? <button type="button" className={primaryButtonClass} disabled={!readiness.canSimulate || previewIsRendering} onClick={beginPreviewRender}>Update preview</button> : null}
+                <button type="button" className={actionButtonClass} onClick={() => { setIsPaintDrawerOpen((open) => !open); setIsWallEditMode(false); }}>Paints</button>
+                <button type="button" className={actionButtonClass} onClick={() => { setIsWallEditMode((open) => !open); setIsPaintDrawerOpen(false); setShowMaskOverlay(true); }}>Edit wall</button>
                 <button type="button" className={actionButtonClass} disabled={!canDownload} onClick={downloadResult}>Download PNG</button>
                 <button type="button" className={actionButtonClass} onClick={clearImage}>New photo</button>
               </>
             ) : null}
-            {isWallEditMode ? (
-              <button type="button" className={primaryButtonClass} onClick={() => setIsWallEditMode(false)}>Return to preview</button>
-            ) : null}
           </div>
         </div>
-        {!firstPreviewComplete && !isWallEditMode ? (
+        {!firstPreviewComplete ? (
           <WorkflowProgress currentStep={guidedStep} canOpenStep={canOpenStep} onStepSelect={openGuidedStep} />
         ) : null}
       </header>
@@ -666,21 +656,12 @@ function App() {
       <main className="flex min-h-0 flex-1 flex-col overflow-hidden">
         <div className="flex min-h-0 flex-1 overflow-hidden">
           <section ref={workspaceRef} className="relative flex min-h-0 flex-1 items-center justify-center overflow-hidden bg-slate-100 p-4 md:p-6">
-            {isWallEditMode ? renderWallEditMode() : firstPreviewComplete ? renderActiveEditor() : renderGuidedPrimary()}
-            {previewIsRendering && !isWallEditMode && !firstPreviewComplete ? <RenderingOverlay /> : null}
+            {firstPreviewComplete ? renderActiveEditor() : renderGuidedPrimary()}
+            {previewIsRendering && !firstPreviewComplete ? <RenderingOverlay /> : null}
           </section>
-          {!firstPreviewComplete && !isWallEditMode ? renderGuidedAside() : null}
-          {isWallEditMode ? renderMaskTools() : null}
+          {!firstPreviewComplete ? renderGuidedAside() : null}
         </div>
-        {!firstPreviewComplete && !isWallEditMode ? renderGuidedFooter() : null}
-        {isWallEditMode ? (
-          <FooterBar
-            status={previewNeedsUpdate ? "Wall selection changed. Return to preview and update the result." : "Refine the wall selection, then return to preview."}
-            primaryLabel="Return to preview"
-            primaryClass={primaryButtonClass}
-            onPrimary={() => setIsWallEditMode(false)}
-          />
-        ) : null}
+        {!firstPreviewComplete ? renderGuidedFooter() : null}
         {exportError ? <p className="border-t border-red-100 bg-red-50 px-4 py-2 text-sm text-red-700">{exportError}</p> : null}
       </main>
     </div>
@@ -881,34 +862,38 @@ function PaintDrawer({
   }, [onClose]);
 
   return (
-    <aside className="absolute bottom-0 right-0 top-0 z-20 w-full max-w-[26rem] overflow-y-auto border-l border-slate-200 bg-white p-5 shadow-2xl">
-      <div className="mb-4 flex items-start justify-between gap-3">
-        <div>
-          <p className="text-xs font-semibold uppercase tracking-wide text-teal-700">Paints</p>
-          <h2 className="mt-1 text-lg font-semibold text-slate-950">Adjust paint colors</h2>
-          <p className="mt-1 text-sm text-slate-600">Edit current and target colors, then update the preview.</p>
+    <aside className="absolute bottom-0 right-0 top-0 z-20 flex w-full max-w-[26rem] flex-col border-l border-slate-200 bg-white shadow-2xl">
+      <div className="flex-1 overflow-y-auto p-5 pb-4">
+        <div className="mb-4 flex items-start justify-between gap-3">
+          <div>
+            <p className="text-xs font-semibold uppercase tracking-wide text-teal-700">Paints</p>
+            <h2 className="mt-1 text-lg font-semibold text-slate-950">Adjust paint colors</h2>
+            <p className="mt-1 text-sm text-slate-600">Edit current and target colors, then update the preview.</p>
+          </div>
+          <button type="button" className="flex min-h-11 min-w-11 items-center justify-center rounded-md text-slate-500 transition-colors hover:bg-slate-100 focus:outline-none focus:ring-2 focus:ring-teal-200 cursor-pointer" onClick={onClose} aria-label="Close paint drawer">
+            <X className="h-5 w-5" />
+          </button>
         </div>
-        <button type="button" className="flex min-h-11 min-w-11 items-center justify-center rounded-md text-slate-500 transition-colors hover:bg-slate-100 focus:outline-none focus:ring-2 focus:ring-teal-200 cursor-pointer" onClick={onClose} aria-label="Close paint drawer">
-          <X className="h-5 w-5" />
-        </button>
+        <PaintsPanel paintA={paintA} paintB={paintB} setPaintA={setPaintA} setPaintB={setPaintB} />
+        <div className="mt-4 rounded-xl border border-slate-200 bg-slate-50 p-4 text-sm text-slate-700">
+          <p className="font-semibold text-slate-900">Preview state</p>
+          <p className="mt-1">{simulationStatus === "running" ? "Updating preview locally..." : previewNeedsUpdate ? "Changes are ready. Update preview when you are done editing." : `Current preview status: ${simulationStatus}.`}</p>
+        </div>
+        <AdvancedDiagnostics
+          metadata={metadata}
+          readinessMessages={readinessMessages}
+          setSimulationMode={setSimulationMode}
+          simulationMode={simulationMode}
+          simulationStatus={simulationStatus}
+          workingHeight={workingHeight}
+          workingWidth={workingWidth}
+        />
       </div>
-      <PaintsPanel paintA={paintA} paintB={paintB} setPaintA={setPaintA} setPaintB={setPaintB} />
-      <div className="mt-4 rounded-xl border border-slate-200 bg-slate-50 p-4 text-sm text-slate-700">
-        <p className="font-semibold text-slate-900">Preview state</p>
-        <p className="mt-1">{simulationStatus === "running" ? "Updating preview locally..." : previewNeedsUpdate ? "Changes are ready. Update preview when you are done editing." : `Current preview status: ${simulationStatus}.`}</p>
-        <button type="button" className="mt-3 min-h-11 w-full rounded-md bg-teal-700 px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-teal-800 disabled:cursor-not-allowed disabled:bg-slate-300 focus:outline-none focus:ring-2 focus:ring-teal-300 cursor-pointer" disabled={!canUpdate} onClick={onUpdate}>
+      <div className="border-t border-slate-200 bg-white p-5">
+        <button type="button" className="min-h-11 w-full rounded-md bg-teal-700 px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-teal-800 disabled:cursor-not-allowed disabled:bg-slate-300 focus:outline-none focus:ring-2 focus:ring-teal-300 cursor-pointer" disabled={!canUpdate} onClick={onUpdate}>
           Update preview
         </button>
       </div>
-      <AdvancedDiagnostics
-        metadata={metadata}
-        readinessMessages={readinessMessages}
-        setSimulationMode={setSimulationMode}
-        simulationMode={simulationMode}
-        simulationStatus={simulationStatus}
-        workingHeight={workingHeight}
-        workingWidth={workingWidth}
-      />
     </aside>
   );
 }
@@ -983,8 +968,11 @@ function MaskToolsPanel({
   actionButtonClass,
   activeTool,
   applyPolygon,
+  canUpdate,
   fillTolerance,
   maskHistory,
+  onClose,
+  onUpdate,
   polygonPoints,
   resetMask,
   resetPolygon,
@@ -1003,8 +991,11 @@ function MaskToolsPanel({
   actionButtonClass: string;
   activeTool: MaskTool;
   applyPolygon: () => void;
+  canUpdate?: boolean;
   fillTolerance: number;
   maskHistory: MaskHistory;
+  onClose?: () => void;
+  onUpdate?: () => void;
   polygonPoints: SmartMaskPoint[];
   resetMask: () => void;
   resetPolygon: () => void;
@@ -1021,54 +1012,78 @@ function MaskToolsPanel({
   setBrushOpacity: (opacity: number) => void;
 }) {
   return (
-    <aside className="w-full overflow-y-auto border-l border-slate-200 bg-white p-5 md:w-96">
-      <section className="rounded-xl border border-teal-100 bg-teal-50 p-4 text-sm text-teal-900">
-        <h2 className="font-semibold">Smart select</h2>
-        <p className="mt-1">Click inside the wall first. Use refinement tools only if the selection needs correction.</p>
-        <button type="button" className={cx("mt-3 w-full", toolButtonClass("edge-add"))} onClick={() => selectTool("edge-add")}>Smart select wall</button>
-      </section>
+    <aside className={cx(
+      "flex w-full flex-col border-l border-slate-200 bg-white",
+      onClose ? "absolute bottom-0 right-0 top-0 z-20 max-w-[26rem] shadow-2xl" : "md:w-96"
+    )}>
+      <div className="flex-1 overflow-y-auto p-5 pb-4">
+        {onClose ? (
+          <div className="mb-4 flex items-start justify-between gap-3">
+            <div>
+              <p className="text-xs font-semibold uppercase tracking-wide text-teal-700">Wall selection</p>
+              <h2 className="mt-1 text-lg font-semibold text-slate-950">Edit wall mask</h2>
+              <p className="mt-1 text-sm text-slate-600">Refine the selected wall area, then update the preview.</p>
+            </div>
+            <button type="button" className="flex min-h-11 min-w-11 items-center justify-center rounded-md text-slate-500 transition-colors hover:bg-slate-100 focus:outline-none focus:ring-2 focus:ring-teal-200 cursor-pointer" onClick={onClose} aria-label="Close wall editing panel">
+              <X className="h-5 w-5" />
+            </button>
+          </div>
+        ) : null}
+        <section className="rounded-xl border border-teal-100 bg-teal-50 p-4 text-sm text-teal-900">
+          <h2 className="font-semibold">Smart select</h2>
+          <p className="mt-1">Click inside the wall first. Use refinement tools only if the selection needs correction.</p>
+          <button type="button" className={cx("mt-3 w-full", toolButtonClass("edge-add"))} onClick={() => selectTool("edge-add")}>Smart select wall</button>
+        </section>
 
-      <section className="mt-4 rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
-        <div className="flex items-center gap-2 text-sm font-semibold text-slate-900">
-          <SlidersHorizontal className="h-4 w-4 text-slate-500" />
-          Refine mask
+        <section className="mt-4 rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+          <div className="flex items-center gap-2 text-sm font-semibold text-slate-900">
+            <SlidersHorizontal className="h-4 w-4 text-slate-500" />
+            Refine mask
+          </div>
+          <div className="mt-3 grid grid-cols-2 gap-2">
+            <button type="button" className={toolButtonClass("brush")} onClick={() => selectTool("brush")}>Brush</button>
+            <button type="button" className={toolButtonClass("eraser")} onClick={() => selectTool("eraser")}>Eraser</button>
+            <button type="button" className={toolButtonClass("polygon-add")} onClick={() => selectTool("polygon-add")}>Poly add</button>
+            <button type="button" className={toolButtonClass("polygon-remove")} onClick={() => selectTool("polygon-remove")}>Poly remove</button>
+          </div>
+          <div className="mt-4 space-y-3">
+            <label className="block text-xs font-semibold text-slate-700">
+              Size: {brushSize}px
+              <input className="mt-1 w-full" type="range" min="4" max="128" value={brushSize} onChange={(event) => setBrushSize(Number(event.target.value))} />
+            </label>
+            <label className="block text-xs font-semibold text-slate-700">
+              Opacity: {Math.round(brushOpacity * 100)}%
+              <input className="mt-1 w-full" type="range" min="0.1" max="1" step="0.1" value={brushOpacity} onChange={(event) => setBrushOpacity(Number(event.target.value))} />
+            </label>
+            <label className="block text-xs font-semibold text-slate-700">
+              Edge tolerance: {fillTolerance}
+              <input className="mt-1 w-full" type="range" min="8" max="96" value={fillTolerance} onChange={(event) => setFillTolerance(Number(event.target.value))} />
+            </label>
+          </div>
+          <div className="mt-4 grid grid-cols-2 gap-2">
+            <button type="button" className={actionButtonClass} disabled={maskHistory.past.length === 0} onClick={undoMask}>Undo</button>
+            <button type="button" className={actionButtonClass} disabled={maskHistory.future.length === 0} onClick={redoMask}>Redo</button>
+            <button type="button" className={actionButtonClass} onClick={() => setShowMaskOverlay((visible) => !visible)}>{showMaskOverlay ? "Hide overlay" : "Show overlay"}</button>
+            <button type="button" className={actionButtonClass} onClick={resetMask}>Reset mask</button>
+            <button type="button" className={actionButtonClass} disabled={polygonPoints.length < 3} onClick={applyPolygon}>Apply polygon</button>
+            <button type="button" className={actionButtonClass} disabled={polygonPoints.length === 0} onClick={resetPolygon}>Reset polygon</button>
+          </div>
+          <p className="mt-4 text-xs text-slate-500">
+            {activeTool.startsWith("edge")
+              ? "Click once inside a wall-like area to fill or remove the detected region."
+              : activeTool.startsWith("polygon")
+                ? `Pinned vertices: ${polygonPoints.length}. Click the image to add points, then apply.`
+                : "Drag on the image to paint or erase the mask manually."}
+          </p>
+        </section>
+      </div>
+      {onUpdate ? (
+        <div className="border-t border-slate-200 bg-white p-5">
+          <button type="button" className="min-h-11 w-full rounded-md bg-teal-700 px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-teal-800 disabled:cursor-not-allowed disabled:bg-slate-300 focus:outline-none focus:ring-2 focus:ring-teal-300 cursor-pointer" disabled={!canUpdate} onClick={onUpdate}>
+            Update preview
+          </button>
         </div>
-        <div className="mt-3 grid grid-cols-2 gap-2">
-          <button type="button" className={toolButtonClass("brush")} onClick={() => selectTool("brush")}>Brush</button>
-          <button type="button" className={toolButtonClass("eraser")} onClick={() => selectTool("eraser")}>Eraser</button>
-          <button type="button" className={toolButtonClass("polygon-add")} onClick={() => selectTool("polygon-add")}>Poly add</button>
-          <button type="button" className={toolButtonClass("polygon-remove")} onClick={() => selectTool("polygon-remove")}>Poly remove</button>
-        </div>
-        <div className="mt-4 space-y-3">
-          <label className="block text-xs font-semibold text-slate-700">
-            Size: {brushSize}px
-            <input className="mt-1 w-full" type="range" min="4" max="128" value={brushSize} onChange={(event) => setBrushSize(Number(event.target.value))} />
-          </label>
-          <label className="block text-xs font-semibold text-slate-700">
-            Opacity: {Math.round(brushOpacity * 100)}%
-            <input className="mt-1 w-full" type="range" min="0.1" max="1" step="0.1" value={brushOpacity} onChange={(event) => setBrushOpacity(Number(event.target.value))} />
-          </label>
-          <label className="block text-xs font-semibold text-slate-700">
-            Edge tolerance: {fillTolerance}
-            <input className="mt-1 w-full" type="range" min="8" max="96" value={fillTolerance} onChange={(event) => setFillTolerance(Number(event.target.value))} />
-          </label>
-        </div>
-        <div className="mt-4 grid grid-cols-2 gap-2">
-          <button type="button" className={actionButtonClass} disabled={maskHistory.past.length === 0} onClick={undoMask}>Undo</button>
-          <button type="button" className={actionButtonClass} disabled={maskHistory.future.length === 0} onClick={redoMask}>Redo</button>
-          <button type="button" className={actionButtonClass} onClick={() => setShowMaskOverlay((visible) => !visible)}>{showMaskOverlay ? "Hide overlay" : "Show overlay"}</button>
-          <button type="button" className={actionButtonClass} onClick={resetMask}>Reset mask</button>
-          <button type="button" className={actionButtonClass} disabled={polygonPoints.length < 3} onClick={applyPolygon}>Apply polygon</button>
-          <button type="button" className={actionButtonClass} disabled={polygonPoints.length === 0} onClick={resetPolygon}>Reset polygon</button>
-        </div>
-        <p className="mt-4 text-xs text-slate-500">
-          {activeTool.startsWith("edge")
-            ? "Click once inside a wall-like area to fill or remove the detected region."
-            : activeTool.startsWith("polygon")
-              ? `Pinned vertices: ${polygonPoints.length}. Click the image to add points, then apply.`
-              : "Drag on the image to paint or erase the mask manually."}
-        </p>
-      </section>
+      ) : null}
     </aside>
   );
 }
