@@ -110,7 +110,7 @@ test("MVP workflow uploads, masks, simulates, compares, and exports", async ({ p
   await expect(page.getByRole("button", { name: "Generate preview" })).toBeEnabled();
   await page.getByRole("button", { name: "Generate preview" }).click();
 
-  await expect(page.getByText("Preview ready")).toBeVisible({ timeout: 10_000 });
+  await expect(page.getByRole("banner").getByText("Preview ready")).toBeVisible({ timeout: 10_000 });
   await expect(page.getByRole("navigation", { name: "Guided workflow progress" })).toBeHidden();
   await expect(page.getByRole("button", { name: "Paints" })).toBeVisible();
   await expect(page.getByRole("button", { name: "Edit wall" })).toBeVisible();
