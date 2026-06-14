@@ -30,6 +30,7 @@ type EditorCanvasProps = {
   showMaskOverlay: boolean;
   polygonPoints: WorkingPoint[];
   panContainerRef: RefObject<HTMLElement | null>;
+  onPanBy?: (deltaX: number, deltaY: number) => void;
   onMaskCommit: (mask: Uint8ClampedArray) => void;
   onPromptSelect: (point: WorkingPoint, mode: "add" | "remove") => void;
   onAreaFill: (point: WorkingPoint, mode: "add" | "remove") => void;
@@ -80,6 +81,7 @@ export function EditorCanvas({
   showMaskOverlay,
   polygonPoints,
   panContainerRef,
+  onPanBy,
   onMaskCommit,
   onPromptSelect,
   onAreaFill,
@@ -94,7 +96,7 @@ export function EditorCanvas({
   const draftMaskRef = useRef<Uint8ClampedArray | null>(null);
   const lastPointRef = useRef<WorkingPoint | null>(null);
   const isDrawingRef = useRef(false);
-  const panRef = useRef<{ pointerId: number; startX: number; startY: number; scrollLeft: number; scrollTop: number } | null>(null);
+  const panRef = useRef<{ pointerId: number; lastX: number; lastY: number; scrollLeft: number; scrollTop: number } | null>(null);
   const [cursor, setCursor] = useState<DisplayCursor | null>(null);
   const [isPanning, setIsPanning] = useState(false);
   const [isHoveringFirstVertex, setIsHoveringFirstVertex] = useState(false);
@@ -272,14 +274,14 @@ export function EditorCanvas({
     event.preventDefault();
     if (activeTool === "hand") {
       const panContainer = panContainerRef.current;
-      if (!panContainer) return;
+      if (!panContainer && !onPanBy) return;
       event.currentTarget.setPointerCapture(event.pointerId);
       panRef.current = {
         pointerId: event.pointerId,
-        startX: event.clientX,
-        startY: event.clientY,
-        scrollLeft: panContainer.scrollLeft,
-        scrollTop: panContainer.scrollTop,
+        lastX: event.clientX,
+        lastY: event.clientY,
+        scrollLeft: panContainer?.scrollLeft ?? 0,
+        scrollTop: panContainer?.scrollTop ?? 0,
       };
       setCursor(null);
       setIsPanning(true);
@@ -333,9 +335,15 @@ export function EditorCanvas({
     if (activeTool === "hand") {
       const pan = panRef.current;
       const panContainer = panContainerRef.current;
-      if (pan && panContainer) {
-        panContainer.scrollLeft = pan.scrollLeft - (event.clientX - pan.startX);
-        panContainer.scrollTop = pan.scrollTop - (event.clientY - pan.startY);
+      if (pan) {
+        if (onPanBy) {
+          onPanBy(event.clientX - pan.lastX, event.clientY - pan.lastY);
+        } else if (panContainer) {
+          panContainer.scrollLeft -= event.clientX - pan.lastX;
+          panContainer.scrollTop -= event.clientY - pan.lastY;
+        }
+        pan.lastX = event.clientX;
+        pan.lastY = event.clientY;
       }
       return;
     }
@@ -375,8 +383,9 @@ export function EditorCanvas({
   };
 
   const firstVertex = polygonPoints[0] ? toDisplayPoint(polygonPoints[0]) : null;
-  const showBrushCursor = cursor && (activeTool === "brush" || activeTool === "eraser");
+  const showBrushCursor = cursor && (activeTool === "brush" || activeTool === "eraser" || activeTool === "edge-add" || activeTool === "edge-remove");
   const showPromptCursor = cursor && (activeTool === "sam-add" || activeTool === "sam-remove");
+  const isRemoveCursor = activeTool === "eraser" || activeTool === "edge-remove";
   const canvasCursor = isPanning
     ? "grabbing"
     : activeTool === "hand"
@@ -406,7 +415,7 @@ export function EditorCanvas({
       {showBrushCursor ? (
         <div
           aria-hidden="true"
-          className={`pointer-events-none absolute rounded-full border-2 ${brush.mode === "erase" ? "border-red-600 bg-red-600/10" : "border-blue-600 bg-blue-600/10"}`}
+          className={`pointer-events-none absolute rounded-full border-2 ${isRemoveCursor ? "border-red-600 bg-red-600/10" : "border-blue-600 bg-blue-600/10"}`}
           style={{
             left: cursor.x - cursor.radius,
             top: cursor.y - cursor.radius,

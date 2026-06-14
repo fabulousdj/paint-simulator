@@ -1,5 +1,5 @@
 import { Brush, Eraser, Eye, EyeOff, Hand, Minus, PaintBucket, Pentagon, Plus, Redo2, RotateCcw, ShieldCheck, SlidersHorizontal, Undo2, X } from "lucide-react";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { ComparisonPreview, type PreviewMode } from "./components/ComparisonPreview";
 import { EditorCanvas, type CanvasViewMode, type MaskTool } from "./components/EditorCanvas";
 import { ImageUpload } from "./components/ImageUpload";
@@ -16,9 +16,9 @@ import { getWorkflowReadiness } from "./utils/workflow";
 
 type GuidedStep = "photo" | "wall" | "colors" | "preview";
 type WallSelectionStatus = "idle" | "running" | "complete" | "error";
-const WALL_IMAGE_ZOOM_MIN = 0.75;
-const WALL_IMAGE_ZOOM_MAX = 2.5;
-const WALL_IMAGE_ZOOM_STEP = 0.25;
+const IMAGE_ZOOM_MIN = 0.75;
+const IMAGE_ZOOM_MAX = 2.5;
+const IMAGE_ZOOM_STEP = 0.25;
 
 const guidedSteps: Array<{ id: GuidedStep; label: string; description: string }> = [
   { id: "photo", label: "Photo", description: "Upload room" },
@@ -54,7 +54,8 @@ function App() {
   const [activeTool, setActiveTool] = useState<MaskTool>("sam-add");
   const [fillTolerance, setFillTolerance] = useState(34);
   const [polygonPoints, setPolygonPoints] = useState<SmartMaskPoint[]>([]);
-  const [wallImageZoom, setWallImageZoom] = useState(1);
+  const [imageZoom, setImageZoom] = useState(1);
+  const [imagePan, setImagePan] = useState({ x: 0, y: 0 });
   const [maskHistory, setMaskHistory] = useState<MaskHistory>(emptyMaskHistory);
   const [viewMode, setViewMode] = useState<CanvasViewMode>("after");
   const [latestPreviewSignature, setLatestPreviewSignature] = useState<string | null>(null);
@@ -91,7 +92,10 @@ function App() {
   const previewIsRendering = isPreviewStartPending || simulation.status === "running";
   const previewNeedsUpdate = firstPreviewComplete && latestPreviewSignature !== currentPreviewSignature;
   const canDownload = firstPreviewComplete && !previewNeedsUpdate && !previewIsRendering && readiness.canExport && simulation.status === "complete";
-  const displayViewMode: CanvasViewMode = state.session.resultImageData && (viewMode === "after" || previewMode !== "toggle") ? "after" : "before";
+  const displayViewMode: CanvasViewMode = !isWallEditMode && state.session.resultImageData && (viewMode === "after" || previewMode !== "toggle") ? "after" : "before";
+  const showImageZoomControls = hasImage && (guidedStep === "photo" || guidedStep === "wall" || firstPreviewComplete || isWallEditMode || previewIsRendering);
+  const reservePreviewToolbarSpace = firstPreviewComplete && imageZoom <= 1;
+  const isRightPanelOpen = firstPreviewComplete && (isPaintDrawerOpen || isWallEditMode);
 
   useEffect(() => {
     if (!state.session.resultImageData && viewMode === "after") setViewMode("before");
@@ -147,7 +151,8 @@ function App() {
     setActiveTool("sam-add");
     setWallSelectionStatus("idle");
     setWallSelectionMessage("Click inside the wall to generate a local AI mask.");
-    setWallImageZoom(1);
+    setImageZoom(1);
+    setImagePan({ x: 0, y: 0 });
     setPreviewRunKey(0);
     setCompletedRunKey(0);
     setViewMode("before");
@@ -290,12 +295,32 @@ function App() {
     setPolygonPoints([]);
   }, [activeTool, commitMaskChange, currentMask, polygonPoints, state.session.image]);
 
-  const zoomWallImage = useCallback((direction: "in" | "out") => {
-    setWallImageZoom((zoom) => {
-      const delta = direction === "in" ? WALL_IMAGE_ZOOM_STEP : -WALL_IMAGE_ZOOM_STEP;
-      return Math.min(WALL_IMAGE_ZOOM_MAX, Math.max(WALL_IMAGE_ZOOM_MIN, Number((zoom + delta).toFixed(2))));
+  const zoomImage = useCallback((direction: "in" | "out") => {
+    setImageZoom((zoom) => {
+      const delta = direction === "in" ? IMAGE_ZOOM_STEP : -IMAGE_ZOOM_STEP;
+      const nextZoom = Math.min(IMAGE_ZOOM_MAX, Math.max(IMAGE_ZOOM_MIN, Number((zoom + delta).toFixed(2))));
+      if (nextZoom <= 1) {
+        setImagePan({ x: 0, y: 0 });
+      } else if (nextZoom !== zoom) {
+        const scaleChange = nextZoom / zoom;
+        setImagePan((pan) => ({ x: pan.x * scaleChange, y: pan.y * scaleChange }));
+      }
+      return nextZoom;
     });
   }, []);
+
+  const panImage = useCallback((deltaX: number, deltaY: number) => {
+    if (imageZoom <= 1) return;
+    setImagePan((pan) => ({ x: pan.x + deltaX, y: pan.y + deltaY }));
+  }, [imageZoom]);
+
+  const renderZoomableSurface = (content: ReactNode) => (
+    <div className="shrink-0 will-change-transform" style={{ transform: `translate3d(${imagePan.x}px, ${imagePan.y}px, 0)` }}>
+      <div className="shrink-0 will-change-transform" style={{ transform: `scale(${imageZoom})`, transformOrigin: "center center" }}>
+        {content}
+      </div>
+    </div>
+  );
 
   const beginPreviewRender = useCallback(() => {
     if (!readiness.canSimulate) return;
@@ -401,10 +426,6 @@ function App() {
       );
     }
 
-    const canvasZoom = guidedStep === "wall" || isWallEditMode ? wallImageZoom : 1;
-    const canvasDisplayWidth = Math.round(state.session.image.displayWidth * canvasZoom);
-    const canvasDisplayHeight = Math.round(state.session.image.displayHeight * canvasZoom);
-
     return (
       <EditorCanvas
         sourceImageData={state.session.image.sourceImageData}
@@ -412,14 +433,15 @@ function App() {
         mask={state.session.maskImageData}
         workingWidth={state.session.image.workingWidth}
         workingHeight={state.session.image.workingHeight}
-        displayWidth={canvasDisplayWidth}
-        displayHeight={canvasDisplayHeight}
+        displayWidth={state.session.image.displayWidth}
+        displayHeight={state.session.image.displayHeight}
         brush={state.session.brush}
         activeTool={activeTool}
         viewMode={displayViewMode}
         showMaskOverlay={showMaskOverlay && (isWallEditMode || !firstPreviewComplete || simulation.status === "running")}
         polygonPoints={polygonPoints}
         panContainerRef={workspaceRef}
+        onPanBy={panImage}
         onMaskCommit={commitMaskChange}
         onPromptSelect={promptSelectWall}
         onAreaFill={fillArea}
@@ -433,17 +455,23 @@ function App() {
     if (upload.isLoading || !hasImage || !state.session.image.sourceImageData) return renderCanvas();
 
     return (
-      <ComparisonPreview
-        sourceImageData={state.session.image.sourceImageData}
-        resultImageData={null}
-        mask={null}
-        workingWidth={state.session.image.workingWidth}
-        workingHeight={state.session.image.workingHeight}
-        displayWidth={state.session.image.displayWidth}
-        displayHeight={state.session.image.displayHeight}
-        mode="toggle"
-        toggleViewMode="before"
-      />
+      renderZoomableSurface(
+        <ComparisonPreview
+          sourceImageData={state.session.image.sourceImageData}
+          resultImageData={null}
+          mask={null}
+          workingWidth={state.session.image.workingWidth}
+          workingHeight={state.session.image.workingHeight}
+          displayWidth={state.session.image.displayWidth}
+          displayHeight={state.session.image.displayHeight}
+          viewportWidth={state.containerW}
+          viewportHeight={state.containerH}
+          mode="toggle"
+          toggleViewMode="before"
+          panContainerRef={workspaceRef}
+          onPanBy={panImage}
+        />
+      )
     );
   };
 
@@ -451,17 +479,23 @@ function App() {
     if (!hasImage || !state.session.image.sourceImageData) return renderCanvas();
 
     return (
-      <ComparisonPreview
-        sourceImageData={state.session.image.sourceImageData}
-        resultImageData={null}
-        mask={state.session.maskImageData}
-        workingWidth={state.session.image.workingWidth}
-        workingHeight={state.session.image.workingHeight}
-        displayWidth={state.session.image.displayWidth}
-        displayHeight={state.session.image.displayHeight}
-        mode="toggle"
-        toggleViewMode="before"
-      />
+      renderZoomableSurface(
+        <ComparisonPreview
+          sourceImageData={state.session.image.sourceImageData}
+          resultImageData={null}
+          mask={state.session.maskImageData}
+          workingWidth={state.session.image.workingWidth}
+          workingHeight={state.session.image.workingHeight}
+          displayWidth={state.session.image.displayWidth}
+          displayHeight={state.session.image.displayHeight}
+          viewportWidth={state.containerW}
+          viewportHeight={state.containerH}
+          mode="toggle"
+          toggleViewMode="before"
+          panContainerRef={workspaceRef}
+          onPanBy={panImage}
+        />
+      )
     );
   };
 
@@ -567,7 +601,7 @@ function App() {
       );
     }
 
-    return renderCanvas();
+    return hasImage ? renderZoomableSurface(renderCanvas()) : renderCanvas();
   };
 
   const renderGuidedFooter = () => {
@@ -619,17 +653,23 @@ function App() {
 
   const renderActiveEditor = () => (
     <>
-      <div className="absolute left-4 top-4 z-10 flex flex-wrap items-center gap-2 rounded-xl border border-slate-200 bg-white/95 p-2 shadow-sm backdrop-blur">
-        <button type="button" className={previewMode === "toggle" && viewMode === "before" ? activeToggleClass : inactiveToggleClass} onClick={() => { setPreviewMode("toggle"); setViewMode("before"); }}>
+      <div
+        className={cx(
+          "absolute left-4 top-4 z-10 flex origin-top-left flex-wrap items-center gap-2 rounded-xl border border-slate-200 bg-white/95 p-2 shadow-sm backdrop-blur transition-all duration-200 ease-out",
+          isWallEditMode ? "pointer-events-none scale-0 opacity-0" : "scale-100 opacity-100"
+        )}
+        aria-hidden={isWallEditMode}
+      >
+        <button type="button" className={previewMode === "toggle" && viewMode === "before" ? activeToggleClass : inactiveToggleClass} onClick={() => { setPreviewMode("toggle"); setViewMode("before"); }} tabIndex={isWallEditMode ? -1 : undefined}>
           Before
         </button>
-        <button type="button" className={viewMode === "after" && previewMode === "toggle" ? activeToggleClass : inactiveToggleClass} onClick={() => { setPreviewMode("toggle"); setViewMode("after"); }} disabled={!state.session.resultImageData}>
+        <button type="button" className={viewMode === "after" && previewMode === "toggle" ? activeToggleClass : inactiveToggleClass} onClick={() => { setPreviewMode("toggle"); setViewMode("after"); }} disabled={!state.session.resultImageData} tabIndex={isWallEditMode ? -1 : undefined}>
           After
         </button>
-        <button type="button" className={previewMode === "split" ? activeToggleClass : inactiveToggleClass} onClick={() => setPreviewMode("split")} disabled={!state.session.resultImageData}>
+        <button type="button" className={previewMode === "split" ? activeToggleClass : inactiveToggleClass} onClick={() => setPreviewMode("split")} disabled={!state.session.resultImageData} tabIndex={isWallEditMode ? -1 : undefined}>
           Split
         </button>
-        <button type="button" className={previewMode === "side-by-side" ? activeToggleClass : inactiveToggleClass} onClick={() => setPreviewMode("side-by-side")} disabled={!state.session.resultImageData}>
+        <button type="button" className={previewMode === "side-by-side" ? activeToggleClass : inactiveToggleClass} onClick={() => setPreviewMode("side-by-side")} disabled={!state.session.resultImageData} tabIndex={isWallEditMode ? -1 : undefined}>
           Side by side
         </button>
       </div>
@@ -638,7 +678,7 @@ function App() {
         label={previewIsRendering ? "Updating locally" : previewNeedsUpdate ? "Preview needs update" : "Preview ready"}
         tone={previewIsRendering ? "blue" : previewNeedsUpdate ? "amber" : "green"}
       />
-      {previewIsRendering ? renderRenderingPreviewSurface() : isWallEditMode ? renderCanvas() : hasImage && state.session.image.sourceImageData ? (
+      {previewIsRendering ? renderRenderingPreviewSurface() : isWallEditMode ? renderZoomableSurface(renderCanvas()) : hasImage && state.session.image.sourceImageData ? renderZoomableSurface(
         <ComparisonPreview
           sourceImageData={state.session.image.sourceImageData}
           resultImageData={previewIsRendering ? null : state.session.resultImageData}
@@ -647,12 +687,23 @@ function App() {
           workingHeight={state.session.image.workingHeight}
           displayWidth={state.session.image.displayWidth}
           displayHeight={state.session.image.displayHeight}
+          viewportWidth={state.containerW}
+          viewportHeight={state.containerH}
           mode={previewMode}
           toggleViewMode={viewMode}
+          panContainerRef={workspaceRef}
+          onPanBy={panImage}
         />
       ) : renderCanvas()}
       {previewIsRendering ? <RenderingOverlay /> : null}
-      {isPaintDrawerOpen ? (
+    </>
+  );
+
+  const renderActiveRightPanel = () => {
+    if (!firstPreviewComplete) return null;
+
+    if (isPaintDrawerOpen) {
+      return (
         <PaintDrawer
           canUpdate={readiness.canSimulate && previewNeedsUpdate && !previewIsRendering}
           metadata={simulation.metadata}
@@ -670,10 +721,13 @@ function App() {
           workingHeight={state.session.image.workingHeight}
           workingWidth={state.session.image.workingWidth}
         />
-      ) : null}
-      {isWallEditMode ? renderMaskTools() : null}
-    </>
-  );
+      );
+    }
+
+    if (isWallEditMode) return renderMaskTools();
+
+    return null;
+  };
 
   return (
     <div className="flex h-screen flex-col bg-slate-50 text-slate-950">
@@ -711,25 +765,30 @@ function App() {
             <div
               ref={workspaceRef}
               className={cx(
-                "relative flex min-h-0 flex-1 overflow-auto p-4 md:p-6",
-                (guidedStep === "wall" || isWallEditMode) && wallImageZoom > 1 ? "items-start justify-start" : "items-center justify-center"
+                "relative flex min-h-0 flex-1 items-center justify-center overflow-hidden px-4 pb-4 transition-all duration-300 ease-out md:px-6 md:pb-6",
+                isRightPanelOpen && "md:mr-[26rem]",
+                reservePreviewToolbarSpace ? "pt-24 md:pt-24" : "pt-4 md:pt-6"
               )}
             >
               {firstPreviewComplete ? renderActiveEditor() : renderGuidedPrimary()}
               {previewIsRendering && !firstPreviewComplete ? <RenderingOverlay /> : null}
               {wallSelectionStatus === "running" ? <WallSelectionOverlay /> : null}
             </div>
-            {guidedStep === "wall" || isWallEditMode ? (
-              <div className="absolute bottom-5 right-5 z-30">
+            {showImageZoomControls ? (
+              <div className={cx(
+                "absolute bottom-5 right-5 z-30 transition-all duration-300 ease-out",
+                isRightPanelOpen && "md:right-[27.25rem]"
+              )}>
                 <ImageZoomControls
-                  zoom={wallImageZoom}
-                  canZoomOut={wallImageZoom > WALL_IMAGE_ZOOM_MIN}
-                  canZoomIn={wallImageZoom < WALL_IMAGE_ZOOM_MAX}
-                  onZoomOut={() => zoomWallImage("out")}
-                  onZoomIn={() => zoomWallImage("in")}
+                  zoom={imageZoom}
+                  canZoomOut={imageZoom > IMAGE_ZOOM_MIN}
+                  canZoomIn={imageZoom < IMAGE_ZOOM_MAX}
+                  onZoomOut={() => zoomImage("out")}
+                  onZoomIn={() => zoomImage("in")}
                 />
               </div>
             ) : null}
+            {renderActiveRightPanel()}
           </section>
           {!firstPreviewComplete ? renderGuidedAside() : null}
         </div>
